@@ -30,7 +30,7 @@
 
 사용자는 데이터 특성에 따라 RAG·TAG·CAG 방식을 직접 선택할 수 있으며, 모델과 검색 설정을 조정하고 품질·속도·비용을 평가한 후 웹 또는 API 형태로 배포할 수 있어야 한다.
 
-본 프로젝트의 기술적 목적은 LangChain의 모델 추상화, Runnable 조합, Retriever, Tool, callback과 streaming 구조를 실제 서비스 흐름에 적용하고 그 동작과 한계를 학습하는 것이다. 완성된 애플리케이션은 GCP 관리형 서비스를 사용해 배포한다.
+본 프로젝트의 기술적 목적은 LangChain의 모델 추상화, Runnable 조합, Retriever, Tool, callback과 streaming 구조를 실제 서비스 흐름에 적용하고 그 동작과 한계를 학습하는 것이다. 완성된 애플리케이션은 Artifact Registry와 단일 GCE VM을 사용해 배포한다.
 
 ### 핵심 가치
 
