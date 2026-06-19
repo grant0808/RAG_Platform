@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="RAG, TAG, CAG 기반 LLMOps 챗봇 플랫폼 인터랙티브 목업" />
+    <title>Foundry — LLMOps Workbench</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#overview" aria-label="Foundry 홈">
+          <span class="brand-mark">F/</span>
+          <span class="brand-word">FOUNDRY</span>
+        </a>
+
+        <nav class="main-nav" aria-label="주요 메뉴">
+          <button class="nav-item active" data-view="overview">
+            <span class="nav-index">01</span><span>Overview</span>
+          </button>
+          <button class="nav-item" data-view="sources">
+            <span class="nav-index">02</span><span>Data sources</span>
+          </button>
+          <button class="nav-item" data-view="providers">
+            <span class="nav-index">03</span><span>Model providers</span>
+          </button>
+          <button class="nav-item" data-view="pipeline">
+            <span class="nav-index">04</span><span>Pipeline studio</span>
+          </button>
+          <button class="nav-item" data-view="playground">
+            <span class="nav-index">05</span><span>Playground</span>
+          </button>
+          <button class="nav-item" data-view="deployments">
+            <span class="nav-index">06</span><span>Deployments</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="usage-block">
+            <div class="usage-label"><span>월간 사용량</span><strong>68%</strong></div>
+            <div class="usage-track"><span></span></div>
+            <small>68,240 / 100K requests</small>
+          </div>
+          <button class="account-button">
+            <span class="avatar">BH</span>
+            <span><strong>Byeonghyeon</strong><small>Workspace admin</small></span>
+            <span aria-hidden="true">↗</span>
+          </button>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <button class="menu-button" id="menuButton" aria-label="메뉴 열기" aria-expanded="false">☰</button>
+          <div class="workspace-switcher">
+            <span class="signal-dot"></span>
+            <span>Personal lab</span>
+            <span class="slash">/</span>
+            <strong id="currentContext">Knowledge assistant</strong>
+          </div>
+          <div class="top-actions">
+            <button class="icon-button" id="commandButton" aria-label="빠른 명령">⌘ K</button>
+            <button class="icon-button notification" aria-label="알림">●</button>
+            <button class="button button-primary" data-action="new-pipeline">+ New pipeline</button>
+          </div>
+        </header>
+
+        <main id="app" tabindex="-1"></main>
+      </div>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+
+    <dialog class="dialog" id="pipelineDialog">
+      <form method="dialog" id="pipelineForm">
+        <div class="dialog-kicker">NEW / PIPELINE</div>
+        <button class="dialog-close" value="cancel" aria-label="닫기">×</button>
+        <h2>어떤 지식을<br />연결할까요?</h2>
+        <label>
+          <span>파이프라인 이름</span>
+          <input name="name" value="Knowledge assistant" autocomplete="off" />
+        </label>
+        <fieldset>
+          <legend>시작 방식</legend>
+          <label class="radio-card"><input type="radio" name="mode" value="hybrid" checked /><span><b>Hybrid routing</b><small>RAG + TAG + CAG 조합</small></span></label>
+          <label class="radio-card"><input type="radio" name="mode" value="rag" /><span><b>Document RAG</b><small>문서 검색부터 시작</small></span></label>
+          <label class="radio-card"><input type="radio" name="mode" value="blank" /><span><b>Blank canvas</b><small>모든 단계를 직접 구성</small></span></label>
+        </fieldset>
+        <div class="dialog-actions">
+          <button class="button button-ghost" value="cancel">Cancel</button>
+          <button class="button button-primary" value="default">Create pipeline →</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="command-menu" id="commandMenu" hidden>
+      <div class="command-box">
+        <div class="command-input"><span>⌕</span><input id="commandInput" placeholder="이동하거나 작업을 검색하세요" /></div>
+        <div class="command-results">
+          <button data-command="pipeline"><span>Pipeline studio 열기</span><kbd>G P</kbd></button>
+          <button data-command="playground"><span>Playground에서 테스트</span><kbd>G T</kbd></button>
+          <button data-command="new"><span>새 파이프라인 만들기</span><kbd>N</kbd></button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
