@@ -32,7 +32,7 @@ class Container:
         knowledge = KnowledgeIndex()
         tables = TableStore(settings.data_dir / "tables.duckdb")
         sources = SourceService(settings, knowledge, tables)
-        pipelines = PipelineService()
+        pipelines = PipelineService(providers)
         orchestrator = Orchestrator(settings, providers, knowledge, tables)
         return cls(
             settings=settings,

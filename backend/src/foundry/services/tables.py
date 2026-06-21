@@ -22,6 +22,14 @@ FORBIDDEN_SQL = (
     exp.Command,
     exp.Merge,
 )
+FORBIDDEN_TABLE_FUNCTION_PREFIXES = (
+    "read_",
+    "scan_",
+    "httpfs",
+    "sqlite_",
+    "postgres_",
+    "mysql_",
+)
 
 
 def safe_identifier(value: str) -> str:
@@ -100,7 +108,13 @@ class TableStore:
             f"Sample rows: {json.dumps(sample, ensure_ascii=False, default=str)}"
         )
 
-    def execute_safe(self, sql: str, max_rows: int = 100) -> dict[str, Any]:
+    def execute_safe(
+        self,
+        sql: str,
+        max_rows: int = 100,
+        *,
+        allowed_tables: set[str] | None = None,
+    ) -> dict[str, Any]:
         cleaned = sql.strip().rstrip(";")
         try:
             statements = sqlglot.parse(cleaned, read="duckdb")
@@ -110,6 +124,20 @@ class TableStore:
             raise ValidationError("Only one SELECT query is allowed")
         if any(statements[0].find(node_type) is not None for node_type in FORBIDDEN_SQL):
             raise ValidationError("SQL contains a forbidden operation")
+
+        table_names = {table.name.lower() for table in statements[0].find_all(exp.Table)}
+        if allowed_tables is not None:
+            allowed = {table.lower() for table in allowed_tables}
+            disallowed = table_names - allowed
+            if disallowed:
+                raise ValidationError(
+                    f"SQL references a table outside the allowlist: {sorted(disallowed)[0]}"
+                )
+
+        for function in statements[0].find_all(exp.Func):
+            name = str(getattr(function, "name", "") or function.sql_name()).lower()
+            if name.startswith(FORBIDDEN_TABLE_FUNCTION_PREFIXES):
+                raise ValidationError(f"SQL contains a forbidden table function: {name}")
 
         bounded_sql = f"SELECT * FROM ({cleaned}) AS foundry_query LIMIT {max_rows}"
         try:

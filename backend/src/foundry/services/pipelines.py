@@ -1,11 +1,42 @@
 import secrets
+from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from foundry.core.errors import NotFoundError
+from foundry.core.errors import NotFoundError, ValidationError
 from foundry.models import Deployment, Pipeline, PipelineVersion
 from foundry.schemas import DeploymentCreate, PipelineCreate, PipelineUpdate
+from foundry.services.providers import ProviderService
+
+
+@dataclass(frozen=True)
+class PipelineSnapshot:
+    id: str
+    current_version: int
+    name: str
+    strategy: str
+    provider: str
+    model: str
+    system_prompt: str
+    top_k: int
+    similarity_threshold: float
+
+    @classmethod
+    def from_version(cls, pipeline_id: str, version: PipelineVersion) -> "PipelineSnapshot":
+        config: dict[str, Any] = version.config
+        return cls(
+            id=pipeline_id,
+            current_version=version.version,
+            name=str(config["name"]),
+            strategy=str(config["strategy"]),
+            provider=str(config["provider"]),
+            model=str(config["model"]),
+            system_prompt=str(config["system_prompt"]),
+            top_k=int(config["top_k"]),
+            similarity_threshold=float(config["similarity_threshold"]),
+        )
 
 
 def pipeline_config(pipeline: Pipeline) -> dict[str, object]:
@@ -21,7 +52,11 @@ def pipeline_config(pipeline: Pipeline) -> dict[str, object]:
 
 
 class PipelineService:
+    def __init__(self, providers: ProviderService) -> None:
+        self.providers = providers
+
     async def create(self, session: AsyncSession, payload: PipelineCreate) -> Pipeline:
+        await self._validate_provider_model(session, payload.provider, payload.model)
         pipeline = Pipeline(**payload.model_dump())
         session.add(pipeline)
         await session.flush()
@@ -50,6 +85,9 @@ class PipelineService:
         self, session: AsyncSession, pipeline_id: str, payload: PipelineUpdate
     ) -> Pipeline:
         pipeline = await self.get(session, pipeline_id)
+        provider = payload.provider or pipeline.provider
+        model = payload.model or pipeline.model
+        await self._validate_provider_model(session, provider, model)
         for name, value in payload.model_dump(exclude_unset=True).items():
             setattr(pipeline, name, value)
         await session.flush()
@@ -58,6 +96,7 @@ class PipelineService:
 
     async def save_version(self, session: AsyncSession, pipeline_id: str) -> PipelineVersion:
         pipeline = await self.get(session, pipeline_id)
+        await self._validate_provider_model(session, pipeline.provider, pipeline.model)
         pipeline.current_version += 1
         version = PipelineVersion(
             pipeline_id=pipeline.id,
@@ -94,6 +133,16 @@ class PipelineService:
         for name, value in version.config.items():
             if hasattr(pipeline, name):
                 setattr(pipeline, name, value)
+        # A rollback creates a new immutable head version. Reusing the old version
+        # number would make subsequent deployments point at the pre-rollback head.
+        pipeline.current_version += 1
+        session.add(
+            PipelineVersion(
+                pipeline_id=pipeline.id,
+                version=pipeline.current_version,
+                config=pipeline_config(pipeline),
+            )
+        )
         await session.flush()
         await session.refresh(pipeline)
         return pipeline
@@ -124,3 +173,27 @@ class PipelineService:
         if deployment is None:
             raise NotFoundError(f"Deployment not found: {slug}")
         return deployment
+
+    async def get_deployment_pipeline(
+        self, session: AsyncSession, slug: str
+    ) -> PipelineSnapshot:
+        deployment = await self.get_deployment(session, slug)
+        result = await session.execute(
+            select(PipelineVersion).where(
+                PipelineVersion.pipeline_id == deployment.pipeline_id,
+                PipelineVersion.version == deployment.version,
+            )
+        )
+        version = result.scalar_one_or_none()
+        if version is None:
+            raise NotFoundError(f"Deployed pipeline version not found: {deployment.version}")
+        return PipelineSnapshot.from_version(deployment.pipeline_id, version)
+
+    async def _validate_provider_model(
+        self, session: AsyncSession, provider: str, model: str
+    ) -> None:
+        connection = await self.providers.get(session, provider)
+        if connection.models and model not in connection.models:
+            raise ValidationError(
+                f"Model is not available for the connected {provider} provider: {model}"
+            )

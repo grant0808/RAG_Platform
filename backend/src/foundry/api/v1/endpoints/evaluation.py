@@ -1,4 +1,3 @@
-import random
 import time
 from datetime import UTC, datetime
 
@@ -47,7 +46,10 @@ async def run_evaluation(
                 session, pipeline, query, pipeline.strategy
             )
             latency = time.perf_counter() - start_time
-            accuracy = round(random.uniform(0.80, 0.98), 2)
+            # Without labeled expected answers, report a deterministic grounding proxy:
+            # whether the execution produced at least one source citation. This avoids
+            # presenting fabricated random values as evaluation accuracy.
+            accuracy = 1.0 if result.get("citations") else 0.0
             cost = 0.015 if pipeline.provider == "openai" else 0.025
             if result.get("cached"):
                 latency = 0.05

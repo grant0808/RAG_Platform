@@ -28,6 +28,7 @@ CODE_FENCE_PATTERN = re.compile(r"```(?:sql)?\s*(.*?)```", re.IGNORECASE | re.DO
 
 class SqlToolInput(BaseModel):
     sql: str = Field(description="One read-only DuckDB SELECT query")
+    allowed_tables: list[str] = Field(description="Exact table names this query may access")
 
 
 @dataclass
@@ -247,7 +248,11 @@ class Orchestrator:
         started = time.perf_counter()
         sql_response: AIMessage = await model.ainvoke(sql_prompt)
         sql = self._extract_sql(self._message_text(sql_response))
-        query_result = await asyncio.to_thread(self.sql_tool.invoke, {"sql": sql})
+        allowed_tables = {source.table_name for source in sources if source.table_name}
+        query_result = await asyncio.to_thread(
+            self.sql_tool.invoke,
+            {"sql": sql, "allowed_tables": sorted(allowed_tables)},
+        )
         duration = self._duration_ms(started)
         source_by_table = {source.table_name: source for source in sources}
         cited = next(
@@ -315,8 +320,8 @@ class Orchestrator:
             return ChatAnthropic(model=pipeline.model, api_key=api_key, streaming=True)
         raise ConfigurationError(f"Unsupported pipeline provider: {pipeline.provider}")
 
-    def _execute_sql(self, sql: str) -> dict[str, Any]:
-        return self.tables.execute_safe(sql)
+    def _execute_sql(self, sql: str, allowed_tables: list[str]) -> dict[str, Any]:
+        return self.tables.execute_safe(sql, allowed_tables=set(allowed_tables))
 
     def _cache_set(self, key: str, answer: str) -> None:
         self.cache[key] = CacheEntry(

@@ -163,6 +163,60 @@ def test_deployment_exposes_public_chat_without_auth(client, app, monkeypatch):
     assert response.status_code == 200
 
 
+def test_deployment_executes_immutable_pipeline_version(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("guide.txt", "Atlas Pro guide")},
+    )
+    pipeline = create_pipeline(client, "rag")
+    deployed = client.post(
+        "/api/v1/deployments",
+        json={"pipeline_id": pipeline["id"], "slug": "immutable-preview"},
+    )
+    assert deployed.status_code == 201
+
+    updated = client.patch(
+        f"/api/v1/pipelines/{pipeline['id']}",
+        json={"strategy": "cag", "model": "changed-draft-model"},
+    )
+    assert updated.status_code == 200
+    response = client.post("/api/v1/public/immutable-preview/chat", json={"message": "Atlas란?"})
+
+    assert response.status_code == 200
+    assert response.json()["strategy"] == "rag"
+    assert response.json()["model"] == "gpt-test"
+
+
+def test_pipeline_requires_connected_provider(client):
+    response = client.post(
+        "/api/v1/pipelines",
+        json={"name": "Invalid pipeline", "provider": "openai", "model": "gpt-test"},
+    )
+    assert response.status_code == 404
+
+
+def test_rollback_creates_deployable_immutable_head(client):
+    connect_provider(client)
+    pipeline = create_pipeline(client, "rag")
+    client.patch(
+        f"/api/v1/pipelines/{pipeline['id']}",
+        json={"strategy": "cag"},
+    )
+    saved = client.post(f"/api/v1/pipelines/{pipeline['id']}/versions")
+    assert saved.status_code == 201
+    assert saved.json()["version"] == 2
+
+    rolled_back = client.post(f"/api/v1/pipelines/{pipeline['id']}/rollback/1")
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["strategy"] == "rag"
+    assert rolled_back.json()["current_version"] == 3
+    versions = client.get(f"/api/v1/pipelines/{pipeline['id']}/versions").json()
+    assert versions[0]["version"] == 3
+    assert versions[0]["config"]["strategy"] == "rag"
+
+
 def test_chat_stream_emits_trace_tokens_and_done(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)

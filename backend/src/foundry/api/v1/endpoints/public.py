@@ -15,8 +15,7 @@ async def public_chat(
     session: AsyncSession = Depends(get_session),
     container: Container = Depends(get_container),
 ) -> ChatResponse:
-    deployment = await container.pipelines.get_deployment(session, slug)
-    pipeline = await container.pipelines.get(session, deployment.pipeline_id)
+    pipeline = await container.pipelines.get_deployment_pipeline(session, slug)
     result = await container.orchestrator.invoke(
         session, pipeline, payload.message, payload.strategy or pipeline.strategy
     )

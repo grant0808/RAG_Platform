@@ -22,3 +22,33 @@ def test_safe_table_store_limits_results(tmp_path):
         assert result["rows"] == [[0], [1], [2]]
     finally:
         store.close()
+
+
+def test_safe_table_store_enforces_table_allowlist(tmp_path):
+    store = TableStore(tmp_path / "tables.duckdb")
+    try:
+        store.connection.execute("CREATE TABLE allowed(value INTEGER)")
+        store.connection.execute("CREATE TABLE private(value INTEGER)")
+        result = store.execute_safe("SELECT * FROM allowed", allowed_tables={"allowed"})
+        assert result["rows"] == []
+        with pytest.raises(ValidationError, match="outside the allowlist"):
+            store.execute_safe("SELECT * FROM private", allowed_tables={"allowed"})
+    finally:
+        store.close()
+
+
+def test_safe_table_store_rejects_external_file_scan(tmp_path):
+    store = TableStore(tmp_path / "tables.duckdb")
+    try:
+        with pytest.raises(ValidationError, match="outside the allowlist|forbidden"):
+            store.execute_safe(
+                "SELECT * FROM read_csv_auto('/etc/passwd')",
+                allowed_tables={"source_table"},
+            )
+        with pytest.raises(ValidationError, match="forbidden"):
+            store.execute_safe(
+                "SELECT read_text('/etc/passwd')",
+                allowed_tables={"source_table"},
+            )
+    finally:
+        store.close()
