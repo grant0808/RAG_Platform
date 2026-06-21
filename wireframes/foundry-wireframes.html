@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Foundry — Product Wireframes</title>
+  <style>
+    :root {
+      --ink: #101311;
+      --muted: #626965;
+      --line: #aeb5b0;
+      --line-dark: #747b77;
+      --paper: #fffef8;
+      --canvas: #dfe3df;
+      --panel: #f4f4ee;
+      --accent: #c9ff35;
+      --danger: #ffd7d2;
+      --success: #dff7de;
+      --radius: 3px;
+      --space: 8px;
+      --screen-width: 1440px;
+      --screen-height: 1024px;
+      --shadow: 8px 8px 0 rgba(16, 19, 17, .16);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+
+    .workspace-bar {
+      position: sticky;
+      inset: 0 0 auto;
+      z-index: 20;
+      min-height: 68px;
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      padding: 12px 24px;
+      color: white;
+      background: var(--ink);
+      border-bottom: 4px solid var(--accent);
+    }
+    .workspace-bar h1 {
+      margin: 0 auto 0 0;
+      font-family: Baskerville, Georgia, serif;
+      font-size: 23px;
+      font-weight: 600;
+      letter-spacing: -.02em;
+    }
+    .workspace-bar small { color: #c9ceca; }
+    .screen-links { display: flex; gap: 6px; }
+    .screen-links a, .zoom-control button {
+      min-width: 32px;
+      padding: 7px 10px;
+      color: white;
+      text-decoration: none;
+      background: transparent;
+      border: 1px solid #606662;
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+    .screen-links a:hover, .screen-links a:focus-visible,
+    .zoom-control button:hover, .zoom-control button:focus-visible {
+      color: var(--ink);
+      background: var(--accent);
+      outline: 0;
+    }
+    .zoom-control { display: flex; align-items: center; gap: 8px; }
+    #zoom-value { width: 42px; color: #dfe3df; text-align: center; }
+
+    .document-header {
+      max-width: 1500px;
+      margin: 46px auto 22px;
+      padding: 0 30px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: end;
+      gap: 24px;
+    }
+    .eyebrow, .spec-id, .micro {
+      font-family: "Courier New", monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .document-header h2 {
+      margin: 4px 0;
+      font-family: Baskerville, Georgia, serif;
+      font-size: 44px;
+      font-weight: 500;
+    }
+    .document-header p { margin: 0; color: var(--muted); }
+    .legend { display: flex; gap: 14px; font-size: 12px; }
+    .legend span { display: inline-flex; gap: 6px; align-items: center; }
+    .legend i { width: 14px; height: 14px; border: 1px solid var(--ink); }
+    .legend .active { background: var(--accent); }
+    .legend .planned { background: repeating-linear-gradient(-45deg,#fff 0 3px,#c4c9c5 3px 4px); }
+
+    .canvas {
+      display: grid;
+      grid-template-columns: repeat(2, var(--screen-width));
+      gap: 90px;
+      width: max-content;
+      padding: 32px 70px 120px;
+      transform: scale(.5);
+      transform-origin: top left;
+    }
+    .canvas-shell { overflow: hidden; }
+
+    .wireframe {
+      width: var(--screen-width);
+      height: var(--screen-height);
+      display: grid;
+      grid-template-columns: 238px 1fr;
+      overflow: hidden;
+      background: var(--paper);
+      border: 2px solid var(--ink);
+      box-shadow: var(--shadow);
+    }
+    .wireframe-label {
+      grid-column: 1 / -1;
+      height: 0;
+      position: relative;
+      z-index: 3;
+    }
+    .wireframe-label span {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      padding: 6px 9px;
+      background: var(--accent);
+      border: 1px solid var(--ink);
+      font: 700 11px "Courier New", monospace;
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      padding: 28px 20px 22px;
+      color: white;
+      background: #151a17;
+      border-right: 2px solid var(--ink);
+    }
+    .brand {
+      margin: 0 10px 34px;
+      font-family: Baskerville, Georgia, serif;
+      font-size: 28px;
+    }
+    .brand b { color: var(--accent); }
+    .project-switcher {
+      padding: 12px;
+      margin-bottom: 28px;
+      border: 1px solid #5b625d;
+      border-radius: var(--radius);
+    }
+    .project-switcher small { color: #aeb5b0; display: block; }
+    .nav { display: grid; gap: 6px; }
+    .nav a {
+      padding: 11px 12px;
+      color: #cfd4d0;
+      text-decoration: none;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+    }
+    .nav a::before { content: attr(data-n); margin-right: 10px; font-family: monospace; color: #7f8782; }
+    .nav a.current {
+      color: var(--ink);
+      background: var(--accent);
+      border-color: var(--ink);
+    }
+    .sidebar-footer {
+      margin-top: auto;
+      padding: 14px 10px 0;
+      color: #aeb5b0;
+      border-top: 1px solid #4b514d;
+      font-size: 12px;
+    }
+
+    .main { min-width: 0; display: flex; flex-direction: column; }
+    .topbar {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      padding: 0 34px;
+      border-bottom: 1px solid var(--line);
+    }
+    .breadcrumb { margin-right: auto; color: var(--muted); font-size: 13px; }
+    .environment {
+      padding: 6px 9px;
+      margin-right: 16px;
+      border: 1px solid var(--line-dark);
+      border-radius: 999px;
+      font: 700 11px "Courier New", monospace;
+    }
+    .avatar { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--ink); border-radius: 50%; }
+
+    .content { flex: 1; min-height: 0; padding: 32px 36px; overflow: hidden; }
+    .page-head { display: flex; align-items: end; gap: 20px; margin-bottom: 28px; }
+    .page-head > div:first-child { margin-right: auto; }
+    .page-head h3 {
+      margin: 2px 0 5px;
+      font-family: Baskerville, Georgia, serif;
+      font-size: 38px;
+      font-weight: 500;
+    }
+    .page-head p { max-width: 650px; margin: 0; color: var(--muted); }
+
+    .button {
+      min-height: 38px;
+      padding: 8px 14px;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+      border-radius: var(--radius);
+      box-shadow: 3px 3px 0 rgba(16,19,17,.16);
+    }
+    .button.primary { background: var(--accent); font-weight: 700; }
+    .button.ghost { box-shadow: none; border-color: var(--line); }
+    .button.danger { background: var(--danger); }
+    .button:focus-visible, .field:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+    .cards { display: grid; gap: 16px; }
+    .cards.cols-4 { grid-template-columns: repeat(4, 1fr); }
+    .cards.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .card {
+      min-width: 0;
+      padding: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line-dark);
+      border-radius: var(--radius);
+    }
+    .card h4 { margin: 0 0 8px; font-size: 14px; }
+    .metric { font-family: Baskerville, Georgia, serif; font-size: 34px; }
+    .delta { color: var(--muted); font-size: 12px; }
+    .accent-strip { border-top: 6px solid var(--accent); }
+
+    .section { margin-top: 22px; }
+    .section-head { display: flex; align-items: center; margin-bottom: 10px; }
+    .section-head h4 { margin: 0 auto 0 0; font-size: 15px; }
+    .section-head a { color: inherit; font-size: 12px; }
+
+    .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .table th, .table td { padding: 13px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+    .table th { background: var(--panel); font: 700 11px "Courier New", monospace; text-transform: uppercase; }
+    .table tr:last-child td { border-bottom: 0; }
+    .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid var(--line-dark); border-radius: 999px; font-size: 11px; }
+    .status::before { content: ""; width: 7px; height: 7px; background: var(--accent); border: 1px solid var(--ink); border-radius: 50%; }
+    .status.muted::before { background: #d0d4d1; }
+    .status.error::before { background: #ff8b7c; }
+
+    .chart {
+      height: 170px;
+      display: flex;
+      align-items: end;
+      gap: 13px;
+      padding: 22px 20px 12px;
+      border: 1px solid var(--line);
+      background: repeating-linear-gradient(0deg,transparent 0 33px,#e1e4e1 33px 34px);
+    }
+    .chart i { flex: 1; min-width: 18px; background: #cbd0cc; border: 1px solid var(--line-dark); }
+    .chart i:nth-child(4n) { background: var(--accent); border-color: var(--ink); }
+
+    .source-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .source-card { min-height: 148px; position: relative; padding: 18px; border: 1px solid var(--line-dark); }
+    .source-icon { width: 40px; height: 40px; display: grid; place-items: center; margin-bottom: 18px; background: var(--panel); border: 1px solid var(--ink); font-family: monospace; }
+    .source-card h4 { margin: 0 0 5px; }
+    .source-card p { margin: 0; color: var(--muted); font-size: 12px; }
+    .source-card .status { position: absolute; top: 14px; right: 14px; }
+
+    .dropzone {
+      min-height: 165px;
+      display: grid;
+      place-items: center;
+      margin-top: 22px;
+      text-align: center;
+      background: repeating-linear-gradient(-45deg,#fff 0 9px,#f2f3ef 9px 10px);
+      border: 2px dashed var(--line-dark);
+    }
+    .dropzone strong { display: block; margin-bottom: 4px; }
+
+    .provider-list { display: grid; gap: 14px; }
+    .provider-row { display: grid; grid-template-columns: 54px 1.3fr 1fr 1fr auto; gap: 16px; align-items: center; padding: 18px; border: 1px solid var(--line-dark); }
+    .provider-logo { width: 48px; height: 48px; display: grid; place-items: center; border: 1px solid var(--ink); font: 700 16px monospace; }
+    .provider-row h4, .provider-row p { margin: 0; }
+    .provider-row p, .provider-row small { color: var(--muted); }
+    .key-mask { font-family: "Courier New", monospace; }
+    .security-note { margin-top: 22px; padding: 16px; background: var(--panel); border-left: 5px solid var(--ink); font-size: 13px; }
+
+    .studio { height: calc(100% - 103px); display: grid; grid-template-columns: 250px 1fr 316px; border: 1px solid var(--line-dark); }
+    .studio-library, .studio-config { padding: 18px; background: var(--panel); overflow: hidden; }
+    .studio-library { border-right: 1px solid var(--line); }
+    .studio-config { border-left: 1px solid var(--line); }
+    .studio h4 { margin: 0 0 14px; }
+    .node-list { display: grid; gap: 9px; }
+    .node-chip { padding: 11px; background: var(--paper); border: 1px solid var(--line-dark); font-size: 12px; }
+    .pipeline-canvas { position: relative; overflow: hidden; background: radial-gradient(#c9ceca 1px, transparent 1px); background-size: 18px 18px; }
+    .flow-node { position: absolute; width: 154px; padding: 14px; background: var(--paper); border: 2px solid var(--ink); box-shadow: 4px 4px 0 #c8cdca; }
+    .flow-node small { display: block; margin-bottom: 4px; font-family: monospace; color: var(--muted); }
+    .flow-node.active { background: var(--accent); }
+    .flow-line { position: absolute; height: 2px; background: var(--ink); transform-origin: left center; }
+    .flow-line::after { content: ""; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-left-color: var(--ink); }
+    .field-group { margin-bottom: 14px; }
+    .field-group label { display: block; margin-bottom: 5px; font: 700 11px "Courier New", monospace; text-transform: uppercase; }
+    .field { width: 100%; min-height: 37px; padding: 8px 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--line-dark); border-radius: 0; }
+    textarea.field { min-height: 90px; resize: none; }
+    .range { height: 5px; margin: 16px 0 6px; background: linear-gradient(90deg,var(--ink) 0 42%,#c8cdca 42%); }
+
+    .playground { height: calc(100% - 104px); display: grid; grid-template-columns: 1fr 380px; border: 1px solid var(--line-dark); }
+    .chat-panel { display: flex; flex-direction: column; min-width: 0; }
+    .chat-toolbar { height: 58px; display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    .segmented { display: inline-flex; border: 1px solid var(--ink); }
+    .segmented span { padding: 7px 12px; border-right: 1px solid var(--ink); font-size: 12px; }
+    .segmented span:last-child { border: 0; }
+    .segmented .on { background: var(--accent); font-weight: 700; }
+    .messages { flex: 1; padding: 22px; overflow: hidden; }
+    .message { max-width: 78%; margin-bottom: 18px; padding: 14px 16px; border: 1px solid var(--line-dark); }
+    .message.user { margin-left: auto; background: var(--panel); }
+    .message.assistant { border-left: 5px solid var(--accent); }
+    .message p { margin: 0 0 10px; line-height: 1.55; }
+    .citation { display: inline-block; padding: 4px 7px; margin-right: 5px; background: var(--panel); border: 1px solid var(--line); font-size: 11px; }
+    .composer { display: flex; gap: 10px; padding: 16px; border-top: 1px solid var(--line); }
+    .trace-panel { padding: 18px; background: var(--panel); border-left: 1px solid var(--line); }
+    .trace-step { display: grid; grid-template-columns: 22px 1fr auto; gap: 9px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .trace-step b { width: 21px; height: 21px; display: grid; place-items: center; background: var(--accent); border: 1px solid var(--ink); border-radius: 50%; font-size: 10px; }
+    .trace-step time { color: var(--muted); font-family: monospace; }
+
+    .eval-layout { display: grid; grid-template-columns: 1fr 330px; gap: 18px; }
+    .score-card { padding: 22px; background: var(--ink); color: white; }
+    .score-card .metric { color: var(--accent); font-size: 56px; }
+    .score-card .threshold { margin-top: 14px; padding-top: 14px; border-top: 1px solid #626965; }
+    .test-case { display: grid; grid-template-columns: 32px 1fr 100px 90px; gap: 12px; align-items: center; padding: 14px; border-bottom: 1px solid var(--line); }
+    .test-case:first-child { background: var(--panel); font-weight: 700; }
+    .test-case .pass { color: #316b30; }
+
+    .deployment-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .deployment { padding: 20px; border: 1px solid var(--line-dark); }
+    .deployment header { display: flex; align-items: center; gap: 10px; }
+    .deployment header h4 { margin: 0 auto 0 0; font-size: 17px; }
+    .deployment dl { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin: 20px 0; }
+    .deployment dt { color: var(--muted); font-size: 11px; }
+    .deployment dd { margin: 3px 0 0; font-family: "Courier New", monospace; font-size: 12px; }
+    .deployment footer { display: flex; gap: 8px; }
+    .api-box { margin-top: 22px; display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 16px; background: var(--ink); color: white; }
+    .api-box code { align-self: center; color: var(--accent); }
+
+    .planned-block { position: relative; }
+    .planned-block::after {
+      content: "PLANNED";
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 4px 6px;
+      background: repeating-linear-gradient(-45deg,#fff 0 3px,#c4c9c5 3px 4px);
+      border: 1px solid var(--ink);
+      font: 700 9px "Courier New", monospace;
+    }
+
+    @media (max-width: 900px) {
+      .screen-links { display: none; }
+      .document-header { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="workspace-bar">
+    <h1>Foundry / Product Wireframes</h1>
+    <small>7 SCREENS · PRD v1.3 · SPEC v1.0</small>
+    <nav class="screen-links" aria-label="화면 바로가기">
+      <a href="#overview">01</a><a href="#sources">02</a><a href="#providers">03</a>
+      <a href="#studio">04</a><a href="#playground">05</a><a href="#evaluations">06</a><a href="#deployments">07</a>
+    </nav>
+    <div class="zoom-control" aria-label="캔버스 확대 축소">
+      <button type="button" id="zoom-out" aria-label="축소">−</button>
+      <span id="zoom-value">50%</span>
+      <button type="button" id="zoom-in" aria-label="확대">＋</button>
+    </div>
+  </header>
+
+  <section class="document-header">
+    <div>
+      <span class="eyebrow">Alternative Figma Deliverable</span>
+      <h2>제품 흐름을 한 장에.</h2>
+      <p>목업의 시각 언어에 기능명세의 상태·예외·운영 흐름을 결합한 데스크톱 와이어프레임.</p>
+    </div>
+    <div class="legend" aria-label="범례"><span><i class="active"></i>Active</span><span><i class="planned"></i>Planned</span><span><i></i>Default</span></div>
+  </section>
+
+  <main class="canvas-shell"><div class="canvas" id="canvas">
+    <!-- 01 Overview -->
+    <article class="wireframe" id="overview" aria-label="Overview 화면">
+      <div class="wireframe-label"><span>01 / OVERVIEW · FS-017</span></div>
+      <aside class="sidebar"><div class="brand">F<b>•</b>UNDRY</div><div class="project-switcher"><small>PROJECT</small>Knowledge assistant ▾</div><nav class="nav"><a class="current" data-n="01">Overview</a><a data-n="02">Sources</a><a data-n="03">Providers</a><a data-n="04">Pipeline Studio</a><a data-n="05">Playground</a><a data-n="06">Evaluations</a><a data-n="07">Deployments</a></nav><div class="sidebar-footer">Workspace / Atlas Lab<br>Developer role</div></aside>
+      <div class="main"><header class="topbar"><span class="breadcrumb">Workspace / Knowledge assistant / Overview</span><span class="environment">STAGING</span><span class="avatar">HB</span></header><section class="content">
+        <div class="page-head"><div><span class="spec-id">CONTROL ROOM</span><h3>System overview</h3><p>파이프라인 상태, 비용, 품질과 최근 실행을 한 화면에서 확인합니다.</p></div><button class="button">Last 7 days ▾</button><button class="button primary">＋ New pipeline</button></div>
+        <div class="cards cols-4"><div class="card accent-strip"><h4>Total requests</h4><div class="metric">8,421</div><span class="delta">↑ 12.4% previous period</span></div><div class="card"><h4>Answer accuracy</h4><div class="metric">88.6%</div><span class="delta">Target ≥ 85%</span></div><div class="card"><h4>p95 first token</h4><div class="metric">1.84s</div><span class="delta">Target ≤ 3.0s</span></div><div class="card"><h4>Estimated cost</h4><div class="metric">$0.021</div><span class="delta">Per successful query</span></div></div>
+        <div class="section"><div class="section-head"><h4>Request volume & strategy mix</h4><a href="#">View telemetry →</a></div><div class="chart" aria-label="요청량 막대 차트"><i style="height:32%"></i><i style="height:45%"></i><i style="height:40%"></i><i style="height:62%"></i><i style="height:57%"></i><i style="height:78%"></i><i style="height:72%"></i><i style="height:87%"></i><i style="height:69%"></i><i style="height:82%"></i><i style="height:76%"></i><i style="height:94%"></i></div></div>
+        <div class="section"><div class="section-head"><h4>Active pipelines</h4><a href="#">All pipelines →</a></div><div class="card" style="padding:0"><table class="table"><thead><tr><th>Pipeline</th><th>Strategy</th><th>Requests</th><th>Accuracy</th><th>Last run</th><th>Health</th></tr></thead><tbody><tr><td><b>Knowledge assistant</b></td><td>RAG + CAG</td><td>6,824</td><td>91.2%</td><td>4 min ago</td><td><span class="status">Healthy</span></td></tr><tr><td><b>CS Copilot</b></td><td>RAG</td><td>1,229</td><td>87.9%</td><td>2 hrs ago</td><td><span class="status">Healthy</span></td></tr><tr><td><b>Data analyst</b></td><td>TAG</td><td>368</td><td>84.9%</td><td>Yesterday</td><td><span class="status error">Review</span></td></tr></tbody></table></div></div>
+      </section></div>
+    </article>
+
+    <!-- 02 Sources -->
+    <article class="wireframe" id="sources" aria-label="Sources 화면">
+      <div class="wireframe-label"><span>02 / SOURCES · FS-003—006, 020</span></div>
+      <aside class="sidebar"><div class="brand">F<b>•</b>UNDRY</div><div class="project-switcher"><small>PROJECT</small>Knowledge assistant ▾</div><nav class="nav"><a data-n="01">Overview</a><a class="current" data-n="02">Sources</a><a data-n="03">Providers</a><a data-n="04">Pipeline Studio</a><a data-n="05">Playground</a><a data-n="06">Evaluations</a><a data-n="07">Deployments</a></nav><div class="sidebar-footer">4 connected sources<br>2.84 GB indexed</div></aside>
+      <div class="main"><header class="topbar"><span class="breadcrumb">Workspace / Knowledge assistant / Sources</span><span class="environment">STAGING</span><span class="avatar">HB</span></header><section class="content">
+        <div class="page-head"><div><span class="spec-id">DATA PLANE</span><h3>Connect every source.</h3><p>원본은 보존하고, 처리 상태와 동기화 오류를 단계별로 확인합니다.</p></div><button class="button">Sync all</button><button class="button primary">＋ Add source</button></div>
+        <div class="source-grid"><div class="source-card"><span class="status">Ready</span><div class="source-icon">PDF</div><h4>Product handbook</h4><p>142 documents · 1,824 chunks<br>Synced 8 min ago</p></div><div class="source-card"><span class="status">Ready</span><div class="source-icon">CSV</div><h4>Support metrics</h4><p>8 tables · 47 columns<br>Synced 24 min ago</p></div><div class="source-card planned-block"><span class="status muted">Planned</span><div class="source-icon">WEB</div><h4>Help center</h4><p>URL crawl · scheduled sync<br>Connector not configured</p></div><div class="source-card planned-block"><span class="status muted">Planned</span><div class="source-icon">NTN</div><h4>Notion workspace</h4><p>Pages & databases<br>Credential required</p></div></div>
+        <div class="dropzone"><div><strong>Drop PDF, Markdown, JSON, CSV or Excel files</strong><span class="delta">Maximum 20 MiB per file · Files are encrypted at rest</span><br><br><button class="button">Browse files</button></div></div>
+        <div class="section"><div class="section-head"><h4>Ingestion jobs</h4><a href="#">Job history →</a></div><div class="card" style="padding:0"><table class="table"><thead><tr><th>Source</th><th>Stage</th><th>Progress</th><th>Updated</th><th>Result</th></tr></thead><tbody><tr><td>security-policy.pdf</td><td>Split → Embed</td><td>████████░░ 82%</td><td>Now</td><td><span class="status">Processing</span></td></tr><tr><td>faq.json</td><td>Parse</td><td>██░░░░░░░░ 18%</td><td>Now</td><td><span class="status">Processing</span></td></tr><tr><td>legacy.xlsm</td><td>Validate</td><td>██████████</td><td>12 min</td><td><span class="status error">Failed</span></td></tr></tbody></table></div></div>
+      </section></div>
+    </article>
+
+    <!-- 03 Providers -->
+    <article class="wireframe" id="providers" aria-label="Providers 화면">
+      <div class="wireframe-label"><span>03 / PROVIDERS · FS-001—002, 019</span></div>
+      <aside class="sidebar"><div class="brand">F<b>•</b>UNDRY</div><div class="project-switcher"><small>PROJECT</small>Knowledge assistant ▾</div><nav class="nav"><a data-n="01">Overview</a><a data-n="02">Sources</a><a class="current" data-n="03">Providers</a><a data-n="04">Pipeline Studio</a><a data-n="05">Playground</a><a data-n="06">Evaluations</a><a data-n="07">Deployments</a></nav><div class="sidebar-footer">Secrets encrypted<br>Admin-only write access</div></aside>
+      <div class="main"><header class="topbar"><span class="breadcrumb">Workspace / Settings / Providers</span><span class="environment">ADMIN</span><span class="avatar">HB</span></header><section class="content">
+        <div class="page-head"><div><span class="spec-id">PROVIDER VAULT</span><h3>Model connections</h3><p>서버를 통해 Provider 키를 검증하고 사용 가능한 모델 Catalog를 동기화합니다.</p></div><button class="button primary">＋ Connect provider</button></div>
+        <div class="provider-list"><div class="provider-row"><div class="provider-logo">OA</div><div><h4>OpenAI</h4><p>12 available models</p></div><div><small>API KEY</small><p class="key-mask">••••••••cret</p></div><div><small>LAST VALIDATED</small><p>Today, 09:42</p></div><div><span class="status">Connected</span><br><br><button class="button ghost">Manage</button></div></div><div class="provider-row"><div class="provider-logo">AN</div><div><h4>Anthropic</h4><p>6 available models</p></div><div><small>API KEY</small><p class="key-mask">••••••••9k2m</p></div><div><small>LAST VALIDATED</small><p>Yesterday, 18:20</p></div><div><span class="status">Connected</span><br><br><button class="button ghost">Manage</button></div></div><div class="provider-row planned-block"><div class="provider-logo">GE</div><div><h4>Google Gemini</h4><p>Future provider adapter</p></div><div><small>API KEY</small><p>Not connected</p></div><div><small>STATUS</small><p>Out of MVP</p></div><div><button class="button" disabled>Unavailable</button></div></div></div>
+        <div class="section"><div class="section-head"><h4>Available model catalog</h4><button class="button ghost">↻ Refresh models</button></div><div class="card" style="padding:0"><table class="table"><thead><tr><th>Provider</th><th>Model ID</th><th>Capability</th><th>Streaming</th><th>Status</th></tr></thead><tbody><tr><td>OpenAI</td><td><code>gpt-5.4-mini</code></td><td>Text · Tools</td><td>Yes</td><td><span class="status">Available</span></td></tr><tr><td>OpenAI</td><td><code>gpt-5.4</code></td><td>Text · Reasoning</td><td>Yes</td><td><span class="status">Available</span></td></tr><tr><td>Anthropic</td><td><code>claude-sonnet</code></td><td>Text · Tools</td><td>Yes</td><td><span class="status">Available</span></td></tr></tbody></table></div></div>
+        <div class="security-note"><b>KEY SECURITY</b> — 키 원문은 저장 후 다시 표시하지 않습니다. 암호화 master key는 GCE host의 root-only 파일로 분리하며 등록·교체·삭제는 감사 이벤트로 기록합니다.</div>
+      </section></div>
+    </article>
+
+    <!-- 04 Studio -->
+    <article class="wireframe" id="studio" aria-label="Pipeline Studio 화면">
+      <div class="wireframe-label"><span>04 / PIPELINE STUDIO · FS-007—008</span></div>
+      <aside class="sidebar"><div class="brand">F<b>•</b>UNDRY</div><div class="project-switcher"><small>PROJECT</small>Knowledge assistant ▾</div><nav class="nav"><a data-n="01">Overview</a><a data-n="02">Sources</a><a data-n="03">Providers</a><a class="current" data-n="04">Pipeline Studio</a><a data-n="05">Playground</a><a data-n="06">Evaluations</a><a data-n="07">Deployments</a></nav><div class="sidebar-footer">Draft · Version 3<br>Unsaved changes</div></aside>
+      <div class="main"><header class="topbar"><span class="breadcrumb">Pipelines / Knowledge assistant / Draft</span><button class="button ghost">Version history</button>&nbsp;<button class="button primary">Save version</button></header><section class="content">
+        <div class="page-head" style="margin-bottom:16px"><div><span class="spec-id">CHAIN BUILDER</span><h3 style="font-size:30px">Knowledge assistant</h3></div><span class="status error">Unsaved draft</span><button class="button">Run test</button></div>
+        <div class="studio"><aside class="studio-library"><h4>Strategy blocks</h4><div class="node-list"><div class="node-chip">▦ Document retriever</div><div class="node-chip">▤ Safe SQL tool</div><div class="node-chip">◫ Cache retriever</div><div class="node-chip">◇ Prompt template</div><div class="node-chip">◉ Chat model</div><div class="node-chip planned-block">⇄ Reranker</div></div><h4 style="margin-top:26px">Sources</h4><div class="node-list"><div class="node-chip">Product handbook</div><div class="node-chip">Support metrics</div></div></aside><div class="pipeline-canvas"><div class="flow-node" style="left:45px;top:210px"><small>INPUT</small>User question</div><div class="flow-line" style="left:200px;top:248px;width:85px"></div><div class="flow-node active" style="left:290px;top:95px"><small>STRATEGY A</small>RAG retriever</div><div class="flow-node" style="left:290px;top:210px"><small>STRATEGY B</small>Safe SQL tool</div><div class="flow-node" style="left:290px;top:325px"><small>STRATEGY C</small>CAG cache</div><div class="flow-line" style="left:445px;top:133px;width:105px;transform:rotate(28deg)"></div><div class="flow-line" style="left:445px;top:248px;width:102px"></div><div class="flow-line" style="left:445px;top:363px;width:105px;transform:rotate(-28deg)"></div><div class="flow-node" style="left:555px;top:210px"><small>PROMPT</small>Grounded answer</div><div class="flow-line" style="left:710px;top:248px;width:75px"></div><div class="flow-node" style="left:790px;top:210px"><small>MODEL</small>gpt-5.4-mini</div></div><aside class="studio-config"><h4>Block settings</h4><div class="field-group"><label>Strategy</label><select class="field"><option>RAG — Document retrieval</option></select></div><div class="field-group"><label>Provider</label><select class="field"><option>OpenAI</option></select></div><div class="field-group"><label>Model</label><select class="field"><option>gpt-5.4-mini</option></select></div><div class="field-group"><label>System prompt</label><textarea class="field">Answer only from supplied context and cite source metadata.</textarea></div><div class="field-group"><label>Top K · 5</label><div class="range"></div></div><div class="field-group"><label>Similarity threshold · 0.20</label><div class="range" style="background:linear-gradient(90deg,var(--ink) 0 20%,#c8cdca 20%)"></div></div><button class="button primary" style="width:100%">Apply to draft</button></aside></div>
+      </section></div>
+    </article>
+
+    <!-- 05 Playground -->
+    <article class="wireframe" id="playground" aria-label="Playground 화면">
+      <div class="wireframe-label"><span>05 / PLAYGROUND · FS-009—013, 016</span></div>
+      <aside class="sidebar"><div class="brand">F<b>•</b>UNDRY</div><div class="project-switcher"><small>PROJECT</small>Knowledge assistant ▾</div><nav class="nav"><a data-n="01">Overview</a><a data-n="02">Sources</a><a data-n="03">Providers</a><a data-n="04">Pipeline Studio</a><a class="current" data-n="05">Playground</a><a data-n="06">Evaluations</a><a data-n="07">Deployments</a></nav><div class="sidebar-footer">Live trace enabled<br>SSE streaming</div></aside>
+      <div class="main"><header class="topbar"><span class="breadcrumb">Playground / Knowledge assistant / Version 3</span><button class="button ghost">Clear</button>&nbsp;<button class="button">Export trace</button></header><section class="content">
+        <div class="page-head" style="margin-bottom:16px"><div><span class="spec-id">QUERY RUNTIME</span><h3 style="font-size:30px">Test the chain.</h3></div><span class="status">Provider ready</span></div>
+        <div class="playground"><section class="chat-panel"><div class="chat-toolbar"><div class="segmented"><span class="on">RAG</span><span>TAG</span><span>CAG</span></div><select class="field" style="width:210px;margin-left:auto"><option>Version 3 · Draft</option></select></div><div class="messages"><div class="message user"><p>Atlas Pro의 고객 데이터 보안 정책은 어떻게 되나요?</p></div><div class="message assistant"><p>Atlas Pro는 저장 데이터 암호화와 전송 구간 TLS를 적용하며, Provider API 키는 애플리케이션 계층에서 암호화된 ciphertext로만 보관합니다.</p><span class="citation">[1] security-policy.pdf · p.12</span><span class="citation">[2] handbook.md · chunk:8</span></div></div><div class="composer"><input class="field" value="Ask a question against connected knowledge…" aria-label="질문"><button class="button primary">Send ↑</button></div></section><aside class="trace-panel"><div class="section-head"><h4>Execution trace</h4><span class="micro">1.84 S</span></div><div class="trace-step"><b>1</b><span><strong>strategy_router</strong><br>Manual · RAG</span><time>2ms</time></div><div class="trace-step"><b>2</b><span><strong>retriever</strong><br>5 candidates · 2 selected</span><time>81ms</time></div><div class="trace-step"><b>3</b><span><strong>prompt_template</strong><br>2,184 input tokens</span><time>4ms</time></div><div class="trace-step"><b>4</b><span><strong>chat_model</strong><br>gpt-5.4-mini · streaming</span><time>1.75s</time></div><div class="card" style="margin-top:18px"><h4>Usage</h4><table class="table"><tr><td>Input</td><td>2,184 tok</td></tr><tr><td>Output</td><td>186 tok</td></tr><tr><td>Est. cost</td><td>$0.021</td></tr><tr><td>Cached</td><td>No</td></tr></table></div></aside></div>
+      </section></div>
+    </article>
+
+    <!-- 06 Evaluations -->
+    <article class="wireframe" id="evaluations" aria-label="Evaluations 화면">
+      <div class="wireframe-label"><span>06 / EVALUATIONS · FS-014</span></div>
+      <aside class="sidebar"><div class="brand">F<b>•</b>UNDRY</div><div class="project-switcher"><small>PROJECT</small>Knowledge assistant ▾</div><nav class="nav"><a data-n="01">Overview</a><a data-n="02">Sources</a><a data-n="03">Providers</a><a data-n="04">Pipeline Studio</a><a data-n="05">Playground</a><a class="current" data-n="06">Evaluations</a><a data-n="07">Deployments</a></nav><div class="sidebar-footer">Evaluation set v2<br>24 test cases</div></aside>
+      <div class="main"><header class="topbar"><span class="breadcrumb">Evaluations / Knowledge assistant / Version 3</span><span class="environment">RESULT SAVED</span><span class="avatar">HB</span></header><section class="content">
+        <div class="page-head"><div><span class="spec-id">QUALITY GATE</span><h3>Evaluation report</h3><p>검색 품질과 생성 품질을 분리해 버전 승인 여부를 판단합니다.</p></div><button class="button">Compare versions</button><button class="button primary">▶ Run evaluation</button></div>
+        <div class="eval-layout"><div><div class="cards cols-3"><div class="card"><h4>Retrieval Recall@5</h4><div class="metric">92.1%</div><span class="delta">+3.4% vs v2</span></div><div class="card"><h4>Answer accuracy</h4><div class="metric">88.6%</div><span class="delta">Target ≥ 85%</span></div><div class="card"><h4>Average latency</h4><div class="metric">1.72s</div><span class="delta">p95 2.84s</span></div></div><div class="section"><div class="section-head"><h4>Test cases</h4><button class="button ghost">＋ Add case</button></div><div class="card" style="padding:0"><div class="test-case"><span>#</span><span>Question</span><span>Accuracy</span><span>Result</span></div><div class="test-case"><span>01</span><span>고객 데이터 암호화 정책은?</span><span>0.94</span><span class="pass">PASS</span></div><div class="test-case"><span>02</span><span>지난 분기 문의가 가장 많은 제품은?</span><span>0.91</span><span class="pass">PASS</span></div><div class="test-case"><span>03</span><span>응답 속도 목표와 기준은?</span><span>0.88</span><span class="pass">PASS</span></div><div class="test-case"><span>04</span><span>지원하지 않는 환불 예외 조건은?</span><span>0.61</span><span style="color:#9e2d22">FAIL</span></div></div></div></div><aside><div class="score-card"><span class="micro">RELEASE DECISION</span><div class="metric">APPROVED</div><p>Version 3 meets the beta quality gate.</p><div class="threshold">Accuracy ≥ 85% ✓<br>p95 first token ≤ 3s ✓<br>Cost/query ≤ $0.03 ✓</div></div><div class="card planned-block" style="margin-top:16px"><h4>Evaluator details</h4><p class="delta">Human labels + rubric judge<br>Retrieval dataset: 24 cases<br>Pricing table: 2026-06</p></div></aside></div>
+      </section></div>
+    </article>
+
+    <!-- 07 Deployments -->
+    <article class="wireframe" id="deployments" aria-label="Deployments 화면">
+      <div class="wireframe-label"><span>07 / DEPLOYMENTS · FS-015, 019</span></div>
+      <aside class="sidebar"><div class="brand">F<b>•</b>UNDRY</div><div class="project-switcher"><small>PROJECT</small>Knowledge assistant ▾</div><nav class="nav"><a data-n="01">Overview</a><a data-n="02">Sources</a><a data-n="03">Providers</a><a data-n="04">Pipeline Studio</a><a data-n="05">Playground</a><a data-n="06">Evaluations</a><a class="current" data-n="07">Deployments</a></nav><div class="sidebar-footer">2 active deployments<br>Version pointers immutable</div></aside>
+      <div class="main"><header class="topbar"><span class="breadcrumb">Deployments / Knowledge assistant</span><span class="environment">GCE · SEOUL</span><span class="avatar">HB</span></header><section class="content">
+        <div class="page-head"><div><span class="spec-id">RELEASE CONTROL</span><h3>Ship a fixed version.</h3><p>변경 가능한 Draft가 아닌 승인된 불변 Pipeline Version을 Preview 또는 Production으로 배포합니다.</p></div><button class="button primary">＋ New deployment</button></div>
+        <div class="deployment-cards"><article class="deployment accent-strip"><header><h4>Production</h4><span class="status">Live</span></header><dl><div><dt>PIPELINE VERSION</dt><dd>v3 · approved</dd></div><div><dt>PUBLIC SLUG</dt><dd>atlas-assistant</dd></div><div><dt>REQUESTS / 24H</dt><dd>6,824</dd></div><div><dt>LAST DEPLOYED</dt><dd>2026-06-21 09:42</dd></div></dl><footer><button class="button">Open chat ↗</button><button class="button">View logs</button><button class="button danger">Rollback</button></footer></article><article class="deployment"><header><h4>Preview</h4><span class="status">Live</span></header><dl><div><dt>PIPELINE VERSION</dt><dd>v4 · draft candidate</dd></div><div><dt>PUBLIC SLUG</dt><dd>atlas-preview</dd></div><div><dt>REQUESTS / 24H</dt><dd>184</dd></div><div><dt>LAST DEPLOYED</dt><dd>2026-06-21 14:18</dd></div></dl><footer><button class="button">Open chat ↗</button><button class="button">Promote</button><button class="button danger">Stop</button></footer></article></div>
+        <div class="api-box"><code>POST https://api.foundry.dev/v1/public/atlas-assistant/chat</code><button class="button">Copy endpoint</button></div>
+        <div class="section"><div class="section-head"><h4>Release history</h4><a href="#">Audit log →</a></div><div class="card" style="padding:0"><table class="table"><thead><tr><th>Environment</th><th>Version</th><th>Actor</th><th>Time</th><th>Action</th></tr></thead><tbody><tr><td>Production</td><td>v3</td><td>hwang@atlas</td><td>Today 09:42</td><td>Deployed</td></tr><tr><td>Preview</td><td>v4</td><td>hwang@atlas</td><td>Today 14:18</td><td>Deployed</td></tr><tr><td>Production</td><td>v2 → v3</td><td>admin@atlas</td><td>Yesterday</td><td>Promoted</td></tr></tbody></table></div></div>
+        <div class="security-note planned-block"><b>PUBLIC API CONTROL</b> — 배포 token 발급, rate limit, 사용 중지와 공개 SSE는 Beta MVP 구현 대상입니다.</div>
+      </section></div>
+    </article>
+  </div></main>
+
+  <script>
+    const canvas = document.querySelector('#canvas');
+    const value = document.querySelector('#zoom-value');
+    let zoom = .5;
+    function setZoom(next) {
+      zoom = Math.max(.25, Math.min(1, next));
+      canvas.style.transform = `scale(${zoom})`;
+      value.textContent = `${Math.round(zoom * 100)}%`;
+      document.querySelector('.canvas-shell').style.height = `${canvas.scrollHeight * zoom + 80}px`;
+    }
+    document.querySelector('#zoom-in').addEventListener('click', () => setZoom(zoom + .1));
+    document.querySelector('#zoom-out').addEventListener('click', () => setZoom(zoom - .1));
+    window.addEventListener('load', () => setZoom(zoom));
+  </script>
+</body>
+</html>
