@@ -1,0 +1,76 @@
+"use client";
+
+import { useState } from "react";
+
+import { EmptyState, PageHeading } from "@/components/ui";
+import { api, streamChat } from "@/lib/api";
+import type { AppSnapshot, ChatResponse, Citation, EvaluationResult, Pipeline, Strategy, TraceEvent } from "@/lib/types";
+
+type Message = { id: number; role: "user" | "assistant"; text: string; result?: ChatResponse; citations?: Citation[] };
+
+export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }: { snapshot: AppSnapshot; pipeline: Pipeline | null; refresh: () => Promise<void>; onSelectPipeline: (id: string) => void; notify: (message: string) => void }) {
+  const [messages, setMessages] = useState<Message[]>([{ id: 0, role: "assistant", text: "연결된 지식에 대해 질문하세요. token, citation, trace가 실시간으로 표시됩니다." }]);
+  const [traces, setTraces] = useState<TraceEvent[]>([]);
+  const [strategy, setStrategy] = useState<Strategy>(pipeline?.strategy ?? "rag");
+  const [running, setRunning] = useState(false);
+  const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
+
+  if (!pipeline) return <section className="page"><PageHeading index="05" title="Test with" outline="evidence." description="실행할 Pipeline이 필요합니다." /><EmptyState title="Pipeline이 없습니다.">먼저 Pipeline을 생성하세요.</EmptyState></section>;
+
+  async function submit(form: FormData) {
+    if (!pipeline) return;
+    const text = String(form.get("message")).trim();
+    if (!text || running) return;
+    const id = Date.now();
+    setMessages((current) => [...current, { id: id - 1, role: "user", text }, { id, role: "assistant", text: "", citations: [] }]);
+    setTraces([]);
+    setRunning(true);
+    try {
+      await streamChat(pipeline.id, text, strategy, {
+        onToken: (token) => setMessages((current) => current.map((message) => message.id === id ? { ...message, text: message.text + token } : message)),
+        onTrace: (trace) => setTraces((current) => [...current, trace]),
+        onCitation: (citation) => setMessages((current) => current.map((message) => message.id === id ? { ...message, citations: [...(message.citations ?? []), citation] } : message)),
+        onDone: (result) => { setMessages((current) => current.map((message) => message.id === id ? { ...message, text: result.answer, result, citations: result.citations } : message)); setTraces(result.trace); },
+      });
+    } catch (caught) {
+      const error = caught instanceof Error ? caught.message : "실행에 실패했습니다.";
+      setMessages((current) => current.map((message) => message.id === id ? { ...message, text: `실행 오류: ${error}` } : message));
+    } finally { setRunning(false); }
+  }
+
+  async function evaluate() {
+    if (!pipeline) return;
+    setRunning(true);
+    try {
+      const result = await api.evaluate(pipeline.id, []);
+      setEvaluation(result);
+      notify("기본 평가 질문 3개를 실행했습니다.");
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "평가에 실패했습니다.");
+    } finally { setRunning(false); }
+  }
+
+  const lastResult = [...messages].reverse().find((message) => message.result)?.result;
+  return (
+    <section className="page playground-page">
+      <PageHeading index="05" title="Test with" outline="evidence." description="SSE token과 LangChain 실행 trace를 같은 시간축에서 확인합니다." action={<button className="button" disabled={running} onClick={() => void evaluate()}>Run evaluation</button>} />
+      <div className="playground-toolbar"><label><span>PIPELINE</span><select value={pipeline.id} onChange={(event) => { const selected = snapshot.pipelines.find((item) => item.id === event.target.value); onSelectPipeline(event.target.value); if (selected) setStrategy(selected.strategy); }}>{snapshot.pipelines.map((item) => <option key={item.id} value={item.id}>{item.name} / v{item.current_version}</option>)}</select></label><label><span>STRATEGY OVERRIDE</span><select value={strategy} onChange={(event) => setStrategy(event.target.value as Strategy)}><option value="rag">RAG</option><option value="tag">TAG</option><option value="cag">CAG</option></select></label><div><span>MODEL</span><strong>{pipeline.provider} / {pipeline.model}</strong></div></div>
+      <div className="playground-layout">
+        <div className="chat-panel">
+          <div className="messages" aria-live="polite">
+            {messages.map((message) => <article key={message.id} className={`message ${message.role}`}><span>{message.role === "user" ? "YOU" : `FOUNDRY / ${message.result?.strategy?.toUpperCase() ?? "READY"}`}</span><div>{message.text || <span className="typing">RUNNING<span>...</span></span>}</div>{message.citations && message.citations.length > 0 && <footer>{message.citations.map((citation, index) => <span key={`${citation.source_id}-${index}`}>{citation.source_name} · {citation.location ?? "source"}</span>)}</footer>}</article>)}
+          </div>
+          <form className="composer" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; void submit(new FormData(form)).then(() => form.reset()); }}><textarea name="message" placeholder="예: Foundry의 응답 속도 목표는?" required maxLength={20000} /><button disabled={running} aria-label="질문 전송">{running ? "…" : "↑"}</button></form>
+        </div>
+        <aside className="trace-panel">
+          <header><span>LIVE / LANGCHAIN TRACE</span><h2>Runnable execution</h2></header>
+          <div className="trace-list">
+            {traces.length === 0 ? <p>질문을 실행하면 Retriever, Tool, Model 단계가 이곳에 표시됩니다.</p> : traces.map((trace, index) => <div key={`${trace.step}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{trace.step}</strong><small>{JSON.stringify(trace.metadata)}</small></div><b>{trace.duration_ms ? `${trace.duration_ms}ms` : trace.status}</b></div>)}
+          </div>
+          <div className="trace-metrics"><div><span>STRATEGY</span><b>{lastResult?.strategy.toUpperCase() ?? strategy.toUpperCase()}</b></div><div><span>CACHED</span><b>{lastResult?.cached ? "HIT" : "MISS"}</b></div><div><span>TOKENS</span><b>{lastResult?.usage.total_tokens ?? "—"}</b></div><div><span>CITATIONS</span><b>{lastResult?.citations.length ?? 0}</b></div></div>
+          {evaluation && <div className="evaluation-card"><span>POC EVALUATION</span><strong>{Math.round(evaluation.average_accuracy_score * 100)}%</strong><dl><div><dt>Latency</dt><dd>{evaluation.average_latency_seconds}s</dd></div><div><dt>Est. cost</dt><dd>${evaluation.total_estimated_cost}</dd></div></dl></div>}
+        </aside>
+      </div>
+    </section>
+  );
+}
