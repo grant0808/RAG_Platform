@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     chunk_size: int = 900
     chunk_overlap: int = 120
     cache_ttl_seconds: int = 300
+    fake_llm_enabled: bool = False
 
     def prepare_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

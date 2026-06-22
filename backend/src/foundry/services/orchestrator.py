@@ -20,6 +20,7 @@ from foundry.core.errors import ConfigurationError, ValidationError
 from foundry.models import Pipeline
 from foundry.schemas import Citation, TraceEvent
 from foundry.services.knowledge import KnowledgeIndex
+from foundry.services.local_model import LocalFakeChatModel
 from foundry.services.providers import ProviderService
 from foundry.services.tables import TableStore
 
@@ -314,6 +315,8 @@ class Orchestrator:
 
     async def _model(self, session: AsyncSession, pipeline: Pipeline) -> Any:
         api_key = await self.providers.get_api_key(session, pipeline.provider)
+        if self.settings.fake_llm_enabled:
+            return LocalFakeChatModel()
         if pipeline.provider == "openai":
             return ChatOpenAI(model=pipeline.model, api_key=api_key, streaming=True)
         if pipeline.provider == "anthropic":

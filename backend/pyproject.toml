@@ -25,6 +25,9 @@ dependencies = [
   "uvicorn[standard]>=0.35,<1",
 ]
 
+[project.scripts]
+foundry-local = "foundry.cli:main"
+
 [dependency-groups]
 dev = [
   "pytest>=8,<10",

@@ -7,10 +7,10 @@ services:
       FOUNDRY_DATA_DIR: /app/.data
       FOUNDRY_DATABASE_URL: sqlite+aiosqlite:////app/.data/foundry.db
       FOUNDRY_MASTER_KEY_PATH: /app/.data/master.key
+      FOUNDRY_FAKE_LLM_ENABLED: ${FOUNDRY_FAKE_LLM_ENABLED:-false}
     volumes:
       - foundry_data:/app/.data
     restart: unless-stopped
 
 volumes:
   foundry_data:
-
