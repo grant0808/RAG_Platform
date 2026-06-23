@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from foundry.core.database import Base
 from foundry.models.base import new_id, utcnow
+
+if TYPE_CHECKING:
+    from foundry.models.deployment import Deployment
 
 
 class Pipeline(Base):
@@ -28,7 +33,10 @@ class Pipeline(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    versions: Mapped[list["PipelineVersion"]] = relationship(
+    versions: Mapped[list[PipelineVersion]] = relationship(
+        back_populates="pipeline", cascade="all, delete-orphan"
+    )
+    deployments: Mapped[list[Deployment]] = relationship(
         back_populates="pipeline", cascade="all, delete-orphan"
     )
 

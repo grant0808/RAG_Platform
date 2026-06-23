@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foundry.api.dependencies import get_container, get_session
@@ -55,6 +55,18 @@ async def update_pipeline(
 ) -> PipelineResponse:
     pipeline = await container.pipelines.update(session, pipeline_id, payload)
     return PipelineResponse.model_validate(pipeline)
+
+@router.delete(
+    "/{pipeline_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_pipeline(
+    pipeline_id: str,
+    session: AsyncSession = Depends(get_session),
+    container: Container = Depends(get_container),
+) -> Response:
+    await container.pipelines.delete(session, pipeline_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

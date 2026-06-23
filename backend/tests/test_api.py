@@ -217,6 +217,41 @@ def test_rollback_creates_deployable_immutable_head(client):
     assert versions[0]["config"]["strategy"] == "rag"
 
 
+def test_delete_pipeline_removes_versions_and_deployments(client):
+    connect_provider(client)
+    pipeline = create_pipeline(client, "rag")
+    saved = client.post(f"/api/v1/pipelines/{pipeline['id']}/versions")
+    assert saved.status_code == 201
+    deployed = client.post(
+        "/api/v1/deployments",
+        json={"pipeline_id": pipeline["id"], "slug": "delete-target"},
+    )
+    assert deployed.status_code == 201
+
+    deleted = client.delete(f"/api/v1/pipelines/{pipeline['id']}")
+
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+    assert client.get(f"/api/v1/pipelines/{pipeline['id']}").status_code == 404
+    assert client.get(f"/api/v1/pipelines/{pipeline['id']}/versions").status_code == 404
+    public_chat = client.post(
+        "/api/v1/public/delete-target/chat",
+        json={"message": "hello"},
+    )
+    assert public_chat.status_code == 404
+    assert all(item["id"] != pipeline["id"] for item in client.get("/api/v1/pipelines").json())
+    assert all(
+        item["slug"] != "delete-target" for item in client.get("/api/v1/deployments").json()
+    )
+
+
+def test_delete_pipeline_returns_404_for_unknown_pipeline(client):
+    response = client.delete("/api/v1/pipelines/unknown-pipeline")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
 def test_chat_stream_emits_trace_tokens_and_done(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)

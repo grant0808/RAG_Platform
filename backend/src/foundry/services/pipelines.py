@@ -94,6 +94,11 @@ class PipelineService:
         await session.refresh(pipeline)
         return pipeline
 
+    async def delete(self, session: AsyncSession, pipeline_id: str) -> None:
+        pipeline = await self.get(session, pipeline_id)
+        await session.delete(pipeline)
+        await session.flush()
+
     async def save_version(self, session: AsyncSession, pipeline_id: str) -> PipelineVersion:
         pipeline = await self.get(session, pipeline_id)
         await self._validate_provider_model(session, pipeline.provider, pipeline.model)

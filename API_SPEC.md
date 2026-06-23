@@ -35,6 +35,7 @@
 | Pipeline | GET | `/pipelines` | 200 | Pipeline 목록 |
 | Pipeline | GET | `/pipelines/{pipeline_id}` | 200 | Pipeline 상세 |
 | Pipeline | PATCH | `/pipelines/{pipeline_id}` | 200 | Draft 설정 수정 |
+| Pipeline | DELETE | `/pipelines/{pipeline_id}` | 204 | Pipeline과 관련 버전·배포 삭제 |
 | Pipeline | POST | `/pipelines/{pipeline_id}/versions` | 201 | 새 불변 버전 저장 |
 | Pipeline | GET | `/pipelines/{pipeline_id}/versions` | 200 | 버전 목록 |
 | Pipeline | POST | `/pipelines/{pipeline_id}/rollback/{version_number}` | 200 | 설정 롤백 및 새 버전 생성 |
@@ -326,6 +327,10 @@ curl -X POST http://localhost:8000/api/v1/sources/upload \
 #### `PATCH /pipelines/{pipeline_id}`
 
 전송한 필드만 Draft에 반영한다. 자동으로 버전을 만들지 않으며 Provider·모델 조합은 다시 검증한다.
+
+#### `DELETE /pipelines/{pipeline_id}`
+
+Pipeline을 삭제하고 본문 없이 204를 반환한다. PoC 정책상 관련 `pipeline_versions`와 `deployments`도 함께 삭제한다. 따라서 해당 Pipeline으로 만든 공개 채팅 slug는 즉시 404가 된다. 존재하지 않는 Pipeline은 404 `not_found`를 반환한다.
 
 #### `POST /pipelines/{pipeline_id}/versions`
 

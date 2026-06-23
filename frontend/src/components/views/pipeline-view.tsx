@@ -102,9 +102,23 @@ export function PipelineView({
     } finally { setBusy(false); }
   }
 
+  async function deletePipeline() {
+    if (!pipeline) return;
+    if (!window.confirm(`"${pipeline.name}" Pipeline을 삭제할까요? 저장된 버전과 배포 엔드포인트도 함께 삭제됩니다.`)) return;
+    setBusy(true);
+    try {
+      await api.deletePipeline(pipeline.id);
+      notify("Pipeline과 관련 버전/배포를 삭제했습니다.");
+      await refresh();
+      onNavigate("overview");
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "Pipeline 삭제에 실패했습니다.");
+    } finally { setBusy(false); }
+  }
+
   return (
     <section className="page">
-      <PageHeading index="04" title="Shape the" outline="reasoning." description="설정 변경은 Draft에, 실행 가능한 기준점은 불변 Pipeline Version에 저장합니다." action={<div className="heading-actions"><button className="button" disabled={busy} onClick={() => void saveDraft()}>Save draft</button><button className="button primary" disabled={busy} onClick={() => void saveVersion()}>Save v{pipeline.current_version + 1}</button></div>} />
+      <PageHeading index="04" title="Shape the" outline="reasoning." description="설정 변경은 Draft에, 실행 가능한 기준점은 불변 Pipeline Version에 저장합니다." action={<div className="heading-actions"><button className="button danger" disabled={busy} onClick={() => void deletePipeline()}>Delete</button><button className="button" disabled={busy} onClick={() => void saveDraft()}>Save draft</button><button className="button primary" disabled={busy} onClick={() => void saveVersion()}>Save v{pipeline.current_version + 1}</button></div>} />
       <div className="pipeline-switcher"><span>ACTIVE PIPELINE</span><select value={pipeline.id} onChange={(event) => onSelectPipeline(event.target.value)}>{snapshot.pipelines.map((item) => <option key={item.id} value={item.id}>{item.name} / v{item.current_version}</option>)}</select><div className="segmented"><button className={tab === "flow" ? "active" : ""} onClick={() => setTab("flow")}>Flow</button><button className={tab === "versions" ? "active" : ""} onClick={() => setTab("versions")}>Versions</button></div></div>
       {tab === "flow" ? (
         <div className="studio-shell">

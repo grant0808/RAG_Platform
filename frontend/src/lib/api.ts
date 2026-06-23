@@ -79,6 +79,7 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  deletePipeline: (id: string) => request<void>(`/pipelines/${id}`, { method: "DELETE" }),
   saveVersion: (id: string) =>
     request<PipelineVersion>(`/pipelines/${id}/versions`, { method: "POST" }),
   listVersions: (id: string) => request<PipelineVersion[]>(`/pipelines/${id}/versions`),
