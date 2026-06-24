@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     pipeline_id: str
     message: str = Field(min_length=1, max_length=20_000)
     strategy: StrategyName | None = None
+    session_id: str | None = None
 
 
 class PublicChatRequest(BaseModel):
@@ -15,6 +16,7 @@ class PublicChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    session_id: str | None = None
     answer: str
     strategy: str
     provider: str

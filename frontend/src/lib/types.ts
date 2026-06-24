@@ -84,6 +84,7 @@ export interface TraceEvent {
 }
 
 export interface ChatResponse {
+  session_id: string | null;
   answer: string;
   strategy: Strategy;
   provider: string;
@@ -92,6 +93,23 @@ export interface ChatResponse {
   trace: TraceEvent[];
   usage: Record<string, number>;
   cached: boolean;
+}
+
+export interface ChatSession {
+  id: string;
+  pipeline_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant";
+  content: string;
+  message_metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface EvaluationResult {

@@ -1,40 +1,135 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { EmptyState, PageHeading } from "@/components/ui";
 import { api, streamChat } from "@/lib/api";
-import type { AppSnapshot, ChatResponse, Citation, EvaluationResult, Pipeline, Strategy, TraceEvent } from "@/lib/types";
+import type {
+  AppSnapshot,
+  ChatResponse,
+  ChatSession,
+  Citation,
+  EvaluationResult,
+  Pipeline,
+  Strategy,
+  TraceEvent,
+} from "@/lib/types";
 
-type Message = { id: number; role: "user" | "assistant"; text: string; result?: ChatResponse; citations?: Citation[] };
+type Message = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  result?: ChatResponse;
+  citations?: Citation[];
+};
+
+const EMPTY_MESSAGE: Message = {
+  id: "empty",
+  role: "assistant",
+  text: "새 대화를 시작하거나 이전 session을 선택하세요. token, citation, trace가 실시간으로 표시됩니다.",
+};
 
 export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }: { snapshot: AppSnapshot; pipeline: Pipeline | null; refresh: () => Promise<void>; onSelectPipeline: (id: string) => void; notify: (message: string) => void }) {
-  const [messages, setMessages] = useState<Message[]>([{ id: 0, role: "assistant", text: "연결된 지식에 대해 질문하세요. token, citation, trace가 실시간으로 표시됩니다." }]);
+  const [messages, setMessages] = useState<Message[]>([EMPTY_MESSAGE]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [traces, setTraces] = useState<TraceEvent[]>([]);
   const [strategy, setStrategy] = useState<Strategy>(pipeline?.strategy ?? "rag");
   const [running, setRunning] = useState(false);
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
 
+  const loadSessions = useCallback(async (pipelineId: string) => {
+    try {
+      setSessions(await api.listChatSessions(pipelineId));
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "대화 session 목록을 불러오지 못했습니다.");
+    }
+  }, [notify]);
+
+  useEffect(() => {
+    if (!pipeline) return;
+    setStrategy(pipeline.strategy);
+    setActiveSessionId(null);
+    setMessages([EMPTY_MESSAGE]);
+    setTraces([]);
+    void loadSessions(pipeline.id);
+  }, [loadSessions, pipeline]);
+
   if (!pipeline) return <section className="page"><PageHeading index="05" title="Test with" outline="evidence." description="실행할 Pipeline이 필요합니다." /><EmptyState title="Pipeline이 없습니다.">먼저 Pipeline을 생성하세요.</EmptyState></section>;
+
+  async function loadMessages(sessionId: string) {
+    setActiveSessionId(sessionId);
+    setTraces([]);
+    try {
+      const history = await api.listChatMessages(sessionId);
+      setMessages(
+        history.length
+          ? history.map((message) => ({
+              id: message.id,
+              role: message.role,
+              text: message.content,
+            }))
+          : [EMPTY_MESSAGE],
+      );
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "대화 내용을 불러오지 못했습니다.");
+    }
+  }
+
+  async function newSession() {
+    if (!pipeline) return;
+    try {
+      const session = await api.createChatSession(pipeline.id);
+      setSessions((current) => [session, ...current]);
+      setActiveSessionId(session.id);
+      setMessages([EMPTY_MESSAGE]);
+      setTraces([]);
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "새 대화 생성에 실패했습니다.");
+    }
+  }
+
+  async function deleteSession() {
+    if (!pipeline || !activeSessionId || !window.confirm("현재 대화 session을 삭제할까요?")) return;
+    const currentPipeline = pipeline;
+    try {
+      await api.deleteChatSession(activeSessionId);
+      setActiveSessionId(null);
+      setMessages([EMPTY_MESSAGE]);
+      await loadSessions(currentPipeline.id);
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "대화 삭제에 실패했습니다.");
+    }
+  }
 
   async function submit(form: FormData) {
     if (!pipeline) return;
     const text = String(form.get("message")).trim();
     if (!text || running) return;
-    const id = Date.now();
-    setMessages((current) => [...current, { id: id - 1, role: "user", text }, { id, role: "assistant", text: "", citations: [] }]);
+    const userId = `user-${Date.now()}`;
+    const assistantId = `assistant-${Date.now()}`;
+    setMessages((current) => [
+      ...(current.length === 1 && current[0].id === "empty" ? [] : current),
+      { id: userId, role: "user", text },
+      { id: assistantId, role: "assistant", text: "", citations: [] },
+    ]);
     setTraces([]);
     setRunning(true);
     try {
-      await streamChat(pipeline.id, text, strategy, {
-        onToken: (token) => setMessages((current) => current.map((message) => message.id === id ? { ...message, text: message.text + token } : message)),
+      await streamChat(pipeline.id, activeSessionId, text, strategy, {
+        onToken: (token) => setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, text: message.text + token } : message)),
         onTrace: (trace) => setTraces((current) => [...current, trace]),
-        onCitation: (citation) => setMessages((current) => current.map((message) => message.id === id ? { ...message, citations: [...(message.citations ?? []), citation] } : message)),
-        onDone: (result) => { setMessages((current) => current.map((message) => message.id === id ? { ...message, text: result.answer, result, citations: result.citations } : message)); setTraces(result.trace); },
+        onCitation: (citation) => setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, citations: [...(message.citations ?? []), citation] } : message)),
+        onDone: (result) => {
+          setActiveSessionId(result.session_id);
+          setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, text: result.answer, result, citations: result.citations } : message));
+          setTraces(result.trace);
+          void loadSessions(pipeline.id);
+        },
       });
     } catch (caught) {
       const error = caught instanceof Error ? caught.message : "실행에 실패했습니다.";
-      setMessages((current) => current.map((message) => message.id === id ? { ...message, text: `실행 오류: ${error}` } : message));
+      setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, text: `실행 오류: ${error}` } : message));
     } finally { setRunning(false); }
   }
 
@@ -54,9 +149,10 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
   return (
     <section className="page playground-page">
       <PageHeading index="05" title="Test with" outline="evidence." description="SSE token과 LangChain 실행 trace를 같은 시간축에서 확인합니다." action={<button className="button" disabled={running} onClick={() => void evaluate()}>Run evaluation</button>} />
-      <div className="playground-toolbar"><label><span>PIPELINE</span><select value={pipeline.id} onChange={(event) => { const selected = snapshot.pipelines.find((item) => item.id === event.target.value); onSelectPipeline(event.target.value); if (selected) setStrategy(selected.strategy); }}>{snapshot.pipelines.map((item) => <option key={item.id} value={item.id}>{item.name} / v{item.current_version}</option>)}</select></label><label><span>STRATEGY OVERRIDE</span><select value={strategy} onChange={(event) => setStrategy(event.target.value as Strategy)}><option value="rag">RAG</option><option value="tag">TAG</option><option value="cag">CAG</option></select></label><div><span>MODEL</span><strong>{pipeline.provider} / {pipeline.model}</strong></div></div>
+      <div className="playground-toolbar"><label><span>PIPELINE</span><select value={pipeline.id} onChange={(event) => { const selected = snapshot.pipelines.find((item) => item.id === event.target.value); onSelectPipeline(event.target.value); if (selected) setStrategy(selected.strategy); }}>{snapshot.pipelines.map((item) => <option key={item.id} value={item.id}>{item.name} / v{item.current_version}</option>)}</select></label><label><span>SESSION</span><select value={activeSessionId ?? ""} onChange={(event) => { if (event.target.value) void loadMessages(event.target.value); else { setActiveSessionId(null); setMessages([EMPTY_MESSAGE]); } }}><option value="">New auto session</option>{sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>)}</select></label><label><span>STRATEGY OVERRIDE</span><select value={strategy} onChange={(event) => setStrategy(event.target.value as Strategy)}><option value="rag">RAG</option><option value="tag">TAG</option><option value="cag">CAG</option></select></label><div><span>MODEL</span><strong>{pipeline.provider} / {pipeline.model}</strong></div></div>
       <div className="playground-layout">
         <div className="chat-panel">
+          <div className="session-actions"><button className="button" disabled={running} onClick={() => void newSession()}>New chat</button><button className="button danger" disabled={running || !activeSessionId} onClick={() => void deleteSession()}>Delete chat</button><span>{activeSessionId ? `SESSION ${activeSessionId.slice(0, 8)}` : "AUTO SESSION ON FIRST MESSAGE"}</span></div>
           <div className="messages" aria-live="polite">
             {messages.map((message) => <article key={message.id} className={`message ${message.role}`}><span>{message.role === "user" ? "YOU" : `FOUNDRY / ${message.result?.strategy?.toUpperCase() ?? "READY"}`}</span><div>{message.text || <span className="typing">RUNNING<span>...</span></span>}</div>{message.citations && message.citations.length > 0 && <footer>{message.citations.map((citation, index) => <span key={`${citation.source_id}-${index}`}>{citation.source_name} · {citation.location ?? "source"}</span>)}</footer>}</article>)}
           </div>

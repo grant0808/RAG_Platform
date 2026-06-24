@@ -39,6 +39,10 @@
 | Pipeline | POST | `/pipelines/{pipeline_id}/versions` | 201 | 새 불변 버전 저장 |
 | Pipeline | GET | `/pipelines/{pipeline_id}/versions` | 200 | 버전 목록 |
 | Pipeline | POST | `/pipelines/{pipeline_id}/rollback/{version_number}` | 200 | 설정 롤백 및 새 버전 생성 |
+| Chat Session | POST | `/chat/sessions` | 201 | 대화 session 생성 |
+| Chat Session | GET | `/chat/sessions` | 200 | 대화 session 목록 |
+| Chat Session | GET | `/chat/sessions/{session_id}/messages` | 200 | session 메시지 목록 |
+| Chat Session | DELETE | `/chat/sessions/{session_id}` | 204 | 대화 session 삭제 |
 | Chat | POST | `/chat` | 200 | Pipeline 채팅 실행 |
 | Chat | POST | `/chat/stream` | 200 | SSE 채팅 실행 |
 | Deployment | POST | `/deployments` | 201 | 현재 Pipeline 버전 배포 |
@@ -170,7 +174,8 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 {
   "pipeline_id": "59c1...",
   "message": "환불 정책을 요약해줘.",
-  "strategy": "rag"
+  "strategy": "rag",
+  "session_id": "c9b2..."
 }
 ```
 
@@ -179,11 +184,13 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 | `pipeline_id` | string | O | 실행할 Pipeline ID |
 | `message` | string | O | 1~20,000자 |
 | `strategy` | enum \| null | X | 미지정 시 Pipeline 전략; `rag`, `tag`, `cag` |
+| `session_id` | string \| null | X | 기존 대화 session ID; 미지정 시 새 session 자동 생성 |
 
 ### ChatResponse
 
 ```json
 {
+  "session_id": "c9b2...",
   "answer": "환불은 구매일로부터 7일 이내 가능합니다.",
   "strategy": "rag",
   "provider": "openai",
@@ -210,6 +217,33 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 ```
 
 `citation.score`와 `location`, `trace.duration_ms`는 `null`일 수 있다. `usage` 키는 Provider SDK가 반환한 사용량 구조에 따라 달라질 수 있다.
+
+### ChatSessionCreate / ChatSessionResponse
+
+```json
+{
+  "pipeline_id": "59c1...",
+  "title": "환불 정책 문의"
+}
+```
+
+| 요청 필드 | 타입 | 필수 | 규칙 |
+|---|---|---:|---|
+| `pipeline_id` | string | O | session을 연결할 Pipeline ID |
+| `title` | string \| null | X | 1~160자; 미지정 시 첫 user 메시지에서 자동 생성 |
+
+응답은 `id`, `pipeline_id`, `title`, `created_at`, `updated_at`을 반환한다.
+
+### ChatMessageResponse
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `id` | string | 메시지 ID |
+| `session_id` | string | 소속 session ID |
+| `role` | enum | `user`, `assistant` |
+| `content` | string | 메시지 본문 |
+| `message_metadata` | object | assistant 응답의 strategy, citations, trace, usage 등 |
+| `created_at` | datetime | 저장 시각 |
 
 ### DeploymentCreate / DeploymentResponse
 
@@ -341,7 +375,7 @@ curl -X POST http://localhost:8000/api/v1/sources/upload \
 
 #### `DELETE /pipelines/{pipeline_id}`
 
-Pipeline을 삭제하고 본문 없이 204를 반환한다. PoC 정책상 관련 `pipeline_versions`와 `deployments`도 함께 삭제한다. 따라서 해당 Pipeline으로 만든 공개 채팅 slug는 즉시 404가 된다. 존재하지 않는 Pipeline은 404 `not_found`를 반환한다.
+Pipeline을 삭제하고 본문 없이 204를 반환한다. PoC 정책상 관련 `pipeline_versions`, `deployments`, `chat_sessions`, `chat_messages`도 함께 삭제한다. 따라서 해당 Pipeline으로 만든 공개 채팅 slug는 즉시 404가 된다. 존재하지 않는 Pipeline은 404 `not_found`를 반환한다.
 
 #### `POST /pipelines/{pipeline_id}/versions`
 
@@ -357,6 +391,22 @@ Pipeline을 삭제하고 본문 없이 204를 반환한다. PoC 정책상 관련
 
 ### 5.5 Chat
 
+#### `POST /chat/sessions`
+
+Pipeline에 연결된 빈 대화 session을 생성한다. 명시적으로 생성하지 않아도 `/chat` 또는 `/chat/stream` 호출 시 `session_id`가 없으면 자동 생성된다.
+
+#### `GET /chat/sessions`
+
+대화 session 목록을 `updated_at` 내림차순으로 반환한다. `?pipeline_id={id}`를 주면 특정 Pipeline의 session만 반환한다.
+
+#### `GET /chat/sessions/{session_id}/messages`
+
+대화 session에 저장된 user/assistant 메시지를 생성 순서대로 반환한다.
+
+#### `DELETE /chat/sessions/{session_id}`
+
+대화 session과 그 메시지를 삭제하고 본문 없이 204를 반환한다.
+
 #### `POST /chat`
 
 현재 Pipeline Draft 설정으로 RAG, TAG 또는 CAG를 동기 실행한다.
@@ -364,12 +414,14 @@ Pipeline을 삭제하고 본문 없이 204를 반환한다. PoC 정책상 관련
 - RAG: 인메모리 벡터 검색 후 출처와 함께 답변한다.
 - TAG: 업로드된 표를 대상으로 읽기 전용 DuckDB `SELECT`를 생성·검증·실행한다.
 - CAG: `pipeline_id:version:normalized_question` 키로 캐시를 조회하고 miss 시 RAG로 fallback한다.
+- `session_id`가 있으면 이전 user/assistant 메시지를 모델 입력에 포함하고, 없으면 새 session을 만든다.
+- user 메시지와 assistant 응답은 `chat_messages`에 저장된다.
 
 TAG에 표 Source가 없으면 409를 반환한다. Provider가 연결되지 않았거나 모델 호출에 실패해도 요청은 실패한다.
 
 #### `POST /chat/stream`
 
-요청 모델은 `/chat`과 동일하고 응답 Content-Type은 `text/event-stream`이다.
+요청 모델은 `/chat`과 동일하고 응답 Content-Type은 `text/event-stream`이다. `done` 이벤트의 payload는 `ChatResponse`와 동일하며 `session_id`를 포함한다.
 
 | event | data | 발생 조건 |
 |---|---|---|

@@ -2,7 +2,10 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 
 
 class FakeChatModel:
+    seen_messages = []
+
     async def ainvoke(self, messages):
+        type(self).seen_messages.append(messages)
         system_text = str(messages[0].content)
         if "Generate exactly one DuckDB SELECT query" in system_text:
             return AIMessage(
@@ -14,6 +17,7 @@ class FakeChatModel:
         )
 
     async def astream(self, messages):
+        type(self).seen_messages.append(messages)
         yield AIMessageChunk(content="Atlas Pro")
         yield AIMessageChunk(
             content="가 가장 많습니다.",
@@ -47,6 +51,8 @@ def create_pipeline(client, strategy="rag"):
 
 
 def install_fake_model(app, monkeypatch):
+    FakeChatModel.seen_messages = []
+
     async def fake_model(*_args, **_kwargs):
         return FakeChatModel()
 
@@ -325,3 +331,51 @@ def test_chat_stream_emits_trace_tokens_and_done(client, app, monkeypatch):
     assert "event: trace" in body
     assert "event: token" in body
     assert "event: done" in body
+
+
+def test_stream_chat_persists_session_and_uses_history(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("memory.txt", "Conversation memory with LangChain")},
+    )
+    pipeline = create_pipeline(client, "rag")
+
+    with client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        json={"pipeline_id": pipeline["id"], "message": "첫 질문입니다"},
+    ) as first_response:
+        first_body = "".join(first_response.iter_text())
+
+    assert first_response.status_code == 200
+    sessions = client.get(f"/api/v1/chat/sessions?pipeline_id={pipeline['id']}").json()
+    assert len(sessions) == 1
+    session_id = sessions[0]["id"]
+    assert f'"session_id": "{session_id}"' in first_body
+    messages = client.get(f"/api/v1/chat/sessions/{session_id}/messages").json()
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+
+    with client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        json={
+            "pipeline_id": pipeline["id"],
+            "session_id": session_id,
+            "message": "방금 질문을 기억하나요?",
+        },
+    ) as second_response:
+        "".join(second_response.iter_text())
+
+    assert second_response.status_code == 200
+    second_call_messages = FakeChatModel.seen_messages[-1]
+    assert any(message.content == "첫 질문입니다" for message in second_call_messages)
+    assert any(message.content == "Atlas Pro가 가장 많습니다." for message in second_call_messages)
+    messages = client.get(f"/api/v1/chat/sessions/{session_id}/messages").json()
+    assert [message["role"] for message in messages] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]

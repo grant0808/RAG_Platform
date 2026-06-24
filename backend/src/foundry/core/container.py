@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from foundry.core.config import Settings
 from foundry.core.crypto import CredentialCipher
 from foundry.core.database import Database
+from foundry.services.conversations import ConversationService
 from foundry.services.knowledge import KnowledgeIndex
 from foundry.services.orchestrator import Orchestrator
 from foundry.services.pipelines import PipelineService
@@ -17,6 +18,7 @@ class Container:
     database: Database
     providers: ProviderService
     provider_client: ProviderClient
+    conversations: ConversationService
     pipelines: PipelineService
     sources: SourceService
     orchestrator: Orchestrator
@@ -29,6 +31,7 @@ class Container:
         cipher = CredentialCipher(settings.master_key_path)
         provider_client = ProviderClient(settings.provider_timeout_seconds)
         providers = ProviderService(cipher, provider_client)
+        conversations = ConversationService()
         knowledge = KnowledgeIndex()
         tables = TableStore(settings.data_dir / "tables.duckdb")
         sources = SourceService(settings, knowledge, tables)
@@ -39,6 +42,7 @@ class Container:
             database=database,
             providers=providers,
             provider_client=provider_client,
+            conversations=conversations,
             pipelines=pipelines,
             sources=sources,
             orchestrator=orchestrator,

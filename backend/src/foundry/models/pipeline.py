@@ -10,6 +10,7 @@ from foundry.core.database import Base
 from foundry.models.base import new_id, utcnow
 
 if TYPE_CHECKING:
+    from foundry.models.chat import ChatSession
     from foundry.models.deployment import Deployment
 
 
@@ -37,6 +38,9 @@ class Pipeline(Base):
         back_populates="pipeline", cascade="all, delete-orphan"
     )
     deployments: Mapped[list[Deployment]] = relationship(
+        back_populates="pipeline", cascade="all, delete-orphan"
+    )
+    chat_sessions: Mapped[list[ChatSession]] = relationship(
         back_populates="pipeline", cascade="all, delete-orphan"
     )
 

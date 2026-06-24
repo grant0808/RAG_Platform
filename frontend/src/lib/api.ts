@@ -1,6 +1,8 @@
 import type {
   AppSnapshot,
+  ChatMessage,
   ChatResponse,
+  ChatSession,
   Deployment,
   DeploymentEnvironment,
   DeploymentStatus,
@@ -115,6 +117,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ pipeline_id: pipelineId, test_queries: testQueries }),
     }),
+  createChatSession: (pipelineId: string, title?: string) =>
+    request<ChatSession>("/chat/sessions", {
+      method: "POST",
+      body: JSON.stringify({ pipeline_id: pipelineId, title: title || null }),
+    }),
+  listChatSessions: (pipelineId: string) =>
+    request<ChatSession[]>(`/chat/sessions?pipeline_id=${encodeURIComponent(pipelineId)}`),
+  listChatMessages: (sessionId: string) =>
+    request<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`),
+  deleteChatSession: (sessionId: string) =>
+    request<void>(`/chat/sessions/${sessionId}`, { method: "DELETE" }),
 };
 
 type StreamHandlers = {
@@ -126,6 +139,7 @@ type StreamHandlers = {
 
 export async function streamChat(
   pipelineId: string,
+  sessionId: string | null,
   message: string,
   strategy: Strategy,
   handlers: StreamHandlers,
@@ -133,7 +147,7 @@ export async function streamChat(
   const response = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pipeline_id: pipelineId, message, strategy }),
+    body: JSON.stringify({ pipeline_id: pipelineId, session_id: sessionId, message, strategy }),
   });
   if (!response.ok || !response.body) {
     const body = await response.json().catch(() => null);
