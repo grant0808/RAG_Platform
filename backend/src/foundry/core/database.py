@@ -1,5 +1,7 @@
 from collections.abc import AsyncIterator
 
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -21,6 +23,27 @@ class Database:
     async def create_schema(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            try:
+                await connection.execute(
+                    text(
+                        "ALTER TABLE deployments "
+                        "ADD COLUMN environment VARCHAR(24) DEFAULT 'preview'"
+                    )
+                )
+            except OperationalError:
+                pass
+            await connection.execute(
+                text(
+                    "UPDATE deployments SET environment = status "
+                    "WHERE status IN ('preview', 'production')"
+                )
+            )
+            await connection.execute(
+                text(
+                    "UPDATE deployments SET status = 'running' "
+                    "WHERE status IN ('preview', 'production')"
+                )
+            )
 
     async def session(self) -> AsyncIterator[AsyncSession]:
         async with self.session_factory() as session:

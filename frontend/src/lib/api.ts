@@ -2,6 +2,8 @@ import type {
   AppSnapshot,
   ChatResponse,
   Deployment,
+  DeploymentEnvironment,
+  DeploymentStatus,
   EvaluationResult,
   Pipeline,
   PipelineVersion,
@@ -85,11 +87,29 @@ export const api = {
   listVersions: (id: string) => request<PipelineVersion[]>(`/pipelines/${id}/versions`),
   rollback: (id: string, version: number) =>
     request<Pipeline>(`/pipelines/${id}/rollback/${version}`, { method: "POST" }),
-  createDeployment: (pipelineId: string, slug: string | null, status: string) =>
+  createDeployment: (
+    pipelineId: string,
+    slug: string | null,
+    environment: DeploymentEnvironment,
+  ) =>
     request<Deployment>("/deployments", {
       method: "POST",
-      body: JSON.stringify({ pipeline_id: pipelineId, slug: slug || null, status }),
+      body: JSON.stringify({ pipeline_id: pipelineId, slug: slug || null, environment }),
     }),
+  updateDeployment: (
+    deploymentId: string,
+    payload: { environment?: DeploymentEnvironment; status?: DeploymentStatus },
+  ) =>
+    request<Deployment>(`/deployments/${deploymentId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  runDeployment: (deploymentId: string) =>
+    request<Deployment>(`/deployments/${deploymentId}/run`, { method: "POST" }),
+  stopDeployment: (deploymentId: string) =>
+    request<Deployment>(`/deployments/${deploymentId}/stop`, { method: "POST" }),
+  deleteDeployment: (deploymentId: string) =>
+    request<void>(`/deployments/${deploymentId}`, { method: "DELETE" }),
   evaluate: (pipelineId: string, testQueries: string[]) =>
     request<EvaluationResult>("/evaluations/run", {
       method: "POST",

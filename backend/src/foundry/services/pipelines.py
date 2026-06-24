@@ -5,9 +5,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from foundry.core.errors import NotFoundError, ValidationError
+from foundry.core.errors import ConfigurationError, NotFoundError, ValidationError
 from foundry.models import Deployment, Pipeline, PipelineVersion
-from foundry.schemas import DeploymentCreate, PipelineCreate, PipelineUpdate
+from foundry.schemas import DeploymentCreate, DeploymentUpdate, PipelineCreate, PipelineUpdate
 from foundry.services.providers import ProviderService
 
 
@@ -161,7 +161,8 @@ class PipelineService:
             pipeline_id=pipeline.id,
             slug=slug,
             version=pipeline.current_version,
-            status=payload.status,
+            environment=payload.environment,
+            status="running",
         )
         session.add(deployment)
         await session.flush()
@@ -171,6 +172,37 @@ class PipelineService:
     async def list_deployments(self, session: AsyncSession) -> list[Deployment]:
         result = await session.execute(select(Deployment).order_by(Deployment.created_at.desc()))
         return list(result.scalars())
+
+    async def get_deployment_by_id(self, session: AsyncSession, deployment_id: str) -> Deployment:
+        deployment = await session.get(Deployment, deployment_id)
+        if deployment is None:
+            raise NotFoundError(f"Deployment not found: {deployment_id}")
+        return deployment
+
+    async def update_deployment(
+        self, session: AsyncSession, deployment_id: str, payload: DeploymentUpdate
+    ) -> Deployment:
+        deployment = await self.get_deployment_by_id(session, deployment_id)
+        for name, value in payload.model_dump(exclude_unset=True).items():
+            setattr(deployment, name, value)
+        await session.flush()
+        await session.refresh(deployment)
+        return deployment
+
+    async def run_deployment(self, session: AsyncSession, deployment_id: str) -> Deployment:
+        return await self.update_deployment(
+            session, deployment_id, DeploymentUpdate(status="running")
+        )
+
+    async def stop_deployment(self, session: AsyncSession, deployment_id: str) -> Deployment:
+        return await self.update_deployment(
+            session, deployment_id, DeploymentUpdate(status="stopped")
+        )
+
+    async def delete_deployment(self, session: AsyncSession, deployment_id: str) -> None:
+        deployment = await self.get_deployment_by_id(session, deployment_id)
+        await session.delete(deployment)
+        await session.flush()
 
     async def get_deployment(self, session: AsyncSession, slug: str) -> Deployment:
         result = await session.execute(select(Deployment).where(Deployment.slug == slug))
@@ -183,6 +215,8 @@ class PipelineService:
         self, session: AsyncSession, slug: str
     ) -> PipelineSnapshot:
         deployment = await self.get_deployment(session, slug)
+        if deployment.status != "running":
+            raise ConfigurationError(f"Deployment is stopped: {slug}")
         result = await session.execute(
             select(PipelineVersion).where(
                 PipelineVersion.pipeline_id == deployment.pipeline_id,

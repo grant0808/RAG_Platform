@@ -5,11 +5,14 @@ from pydantic import BaseModel, Field, field_validator
 
 from foundry.schemas.base import OrmModel
 
+DeploymentEnvironment = Literal["preview", "production"]
+DeploymentStatus = Literal["running", "stopped"]
+
 
 class DeploymentCreate(BaseModel):
     pipeline_id: str
     slug: str | None = Field(default=None, min_length=3, max_length=80)
-    status: Literal["preview", "production"] = "preview"
+    environment: DeploymentEnvironment = "preview"
 
     @field_validator("slug")
     @classmethod
@@ -22,10 +25,16 @@ class DeploymentCreate(BaseModel):
         return normalized
 
 
+class DeploymentUpdate(BaseModel):
+    environment: DeploymentEnvironment | None = None
+    status: DeploymentStatus | None = None
+
+
 class DeploymentResponse(OrmModel):
     id: str
     pipeline_id: str
     slug: str
     version: int
+    environment: str
     status: str
     created_at: datetime

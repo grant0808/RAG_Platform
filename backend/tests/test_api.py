@@ -158,6 +158,8 @@ def test_deployment_exposes_public_chat_without_auth(client, app, monkeypatch):
         json={"pipeline_id": pipeline["id"], "slug": "atlas-preview"},
     )
     assert deployed.status_code == 201
+    assert deployed.json()["environment"] == "preview"
+    assert deployed.json()["status"] == "running"
 
     response = client.post("/api/v1/public/atlas-preview/chat", json={"message": "Atlas란?"})
     assert response.status_code == 200
@@ -187,6 +189,57 @@ def test_deployment_executes_immutable_pipeline_version(client, app, monkeypatch
     assert response.status_code == 200
     assert response.json()["strategy"] == "rag"
     assert response.json()["model"] == "gpt-test"
+
+
+def test_deployment_can_stop_run_change_environment_and_delete(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("lifecycle.txt", "Deployment lifecycle guide")},
+    )
+    pipeline = create_pipeline(client, "rag")
+    deployed = client.post(
+        "/api/v1/deployments",
+        json={
+            "pipeline_id": pipeline["id"],
+            "slug": "lifecycle-preview",
+            "environment": "preview",
+        },
+    ).json()
+
+    promoted = client.patch(
+        f"/api/v1/deployments/{deployed['id']}",
+        json={"environment": "production"},
+    )
+    assert promoted.status_code == 200
+    assert promoted.json()["environment"] == "production"
+    assert promoted.json()["status"] == "running"
+
+    stopped = client.post(f"/api/v1/deployments/{deployed['id']}/stop")
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "stopped"
+    unavailable = client.post(
+        "/api/v1/public/lifecycle-preview/chat",
+        json={"message": "hello"},
+    )
+    assert unavailable.status_code == 409
+
+    running = client.post(f"/api/v1/deployments/{deployed['id']}/run")
+    assert running.status_code == 200
+    assert running.json()["status"] == "running"
+    available = client.post(
+        "/api/v1/public/lifecycle-preview/chat",
+        json={"message": "hello"},
+    )
+    assert available.status_code == 200
+
+    deleted = client.delete(f"/api/v1/deployments/{deployed['id']}")
+    assert deleted.status_code == 204
+    assert client.post(
+        "/api/v1/public/lifecycle-preview/chat",
+        json={"message": "hello"},
+    ).status_code == 404
 
 
 def test_pipeline_requires_connected_provider(client):

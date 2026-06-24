@@ -43,6 +43,10 @@
 | Chat | POST | `/chat/stream` | 200 | SSE 채팅 실행 |
 | Deployment | POST | `/deployments` | 201 | 현재 Pipeline 버전 배포 |
 | Deployment | GET | `/deployments` | 200 | 배포 목록 |
+| Deployment | PATCH | `/deployments/{deployment_id}` | 200 | 배포 환경 또는 실행 상태 변경 |
+| Deployment | POST | `/deployments/{deployment_id}/run` | 200 | 배포 실행 |
+| Deployment | POST | `/deployments/{deployment_id}/stop` | 200 | 배포 중지 |
+| Deployment | DELETE | `/deployments/{deployment_id}` | 204 | 배포 삭제 |
 | Public | POST | `/public/{slug}/chat` | 200 | 배포 버전으로 공개 채팅 |
 | CAG | GET | `/cag/cache` | 200 | 유효한 캐시 목록 |
 | CAG | POST | `/cag/cache` | 201 | 캐시 항목 수동 등록 |
@@ -213,7 +217,7 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 {
   "pipeline_id": "59c1...",
   "slug": "support-bot",
-  "status": "preview"
+  "environment": "preview"
 }
 ```
 
@@ -221,9 +225,16 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 |---|---|---:|---|
 | `pipeline_id` | string | O | 배포할 Pipeline ID |
 | `slug` | string \| null | X | 3~80자, 영문·숫자·하이픈; 미지정 시 자동 생성 |
-| `status` | enum | X | 기본 `preview`; `preview`, `production` |
+| `environment` | enum | X | 기본 `preview`; `preview`, `production` |
 
-응답은 `id`, `pipeline_id`, `slug`, `version`, `status`, `created_at`을 반환한다. `version`은 생성 시점의 Pipeline head 버전이다.
+응답은 `id`, `pipeline_id`, `slug`, `version`, `environment`, `status`, `created_at`을 반환한다. `version`은 생성 시점의 Pipeline head 버전이다. `status`는 실행 상태이며 `running`, `stopped` 중 하나다.
+
+### DeploymentUpdate
+
+| 요청 필드 | 타입 | 필수 | 규칙 |
+|---|---|---:|---|
+| `environment` | enum | X | `preview`, `production` |
+| `status` | enum | X | `running`, `stopped` |
 
 ### CacheCreateRequest / CacheEntryResponse
 
@@ -384,15 +395,31 @@ data: {"answer":"환불은 ...","strategy":"rag","provider":"openai","model":"gp
 
 #### `POST /deployments`
 
-Pipeline의 현재 버전을 Preview 또는 Production 배포로 고정한다. 이후 Draft가 변경되어도 배포는 생성 당시 버전 스냅샷을 사용한다.
+Pipeline의 현재 버전을 Preview 또는 Production 배포로 고정하고 기본 실행 상태를 `running`으로 만든다. 이후 Draft가 변경되어도 배포는 생성 당시 버전 스냅샷을 사용한다.
 
 #### `GET /deployments`
 
 생성 시각 내림차순으로 모든 배포를 반환한다.
 
+#### `PATCH /deployments/{deployment_id}`
+
+배포의 `environment` 또는 `status`를 부분 변경한다. Preview/Production 전환은 배포가 가리키는 Pipeline 버전을 바꾸지 않는다.
+
+#### `POST /deployments/{deployment_id}/run`
+
+배포 상태를 `running`으로 변경한다.
+
+#### `POST /deployments/{deployment_id}/stop`
+
+배포 상태를 `stopped`로 변경한다. 중지된 배포의 public chat은 409 `configuration_error`를 반환한다.
+
+#### `DELETE /deployments/{deployment_id}`
+
+배포를 삭제하고 본문 없이 204를 반환한다. 삭제된 slug의 public chat은 404 `not_found`를 반환한다.
+
 #### `POST /public/{slug}/chat`
 
-배포가 가리키는 불변 Pipeline 버전으로 채팅한다. 요청 본문은 `pipeline_id`가 없는 `PublicChatRequest`다.
+실행 중인 배포가 가리키는 불변 Pipeline 버전으로 채팅한다. 요청 본문은 `pipeline_id`가 없는 `PublicChatRequest`다.
 
 ```json
 {

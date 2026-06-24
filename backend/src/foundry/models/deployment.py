@@ -20,7 +20,8 @@ class Deployment(Base):
     pipeline_id: Mapped[str] = mapped_column(ForeignKey("pipelines.id", ondelete="CASCADE"))
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     version: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(24), default="preview")
+    environment: Mapped[str] = mapped_column(String(24), default="preview")
+    status: Mapped[str] = mapped_column(String(24), default="running")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     pipeline: Mapped[Pipeline] = relationship(back_populates="deployments")

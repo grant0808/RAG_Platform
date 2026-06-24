@@ -14,7 +14,10 @@ export function OverviewView({
 }) {
   const strategies = new Set(snapshot.pipelines.map((pipeline) => pipeline.strategy));
   const chunks = snapshot.sources.reduce((total, source) => total + source.chunk_count, 0);
-  const production = snapshot.deployments.filter((item) => item.status === "production").length;
+  const production = snapshot.deployments.filter(
+    (item) => item.environment === "production",
+  ).length;
+  const stopped = snapshot.deployments.filter((item) => item.status === "stopped").length;
 
   return (
     <section className="page">
@@ -60,7 +63,11 @@ export function OverviewView({
       <div className="metric-grid">
         <Metric label="PIPELINES" value={String(snapshot.pipelines.length)} detail={`${strategies.size} strategy types`} />
         <Metric label="KNOWLEDGE SOURCES" value={String(snapshot.sources.length)} detail={`${chunks} indexed chunks`} />
-        <Metric label="DEPLOYMENTS" value={String(snapshot.deployments.length)} detail={`${production} production`} />
+        <Metric
+          label="DEPLOYMENTS"
+          value={String(snapshot.deployments.length)}
+          detail={`${production} production · ${stopped} stopped`}
+        />
         <Metric label="AUTH" value={snapshot.health?.auth_enabled ? "ON" : "OFF"} detail="PoC local only" warning />
       </div>
 

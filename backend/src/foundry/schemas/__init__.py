@@ -1,7 +1,7 @@
 from foundry.schemas.base import Citation, OrmModel, TraceEvent
 from foundry.schemas.cag import CacheCreateRequest, CacheEntryResponse
 from foundry.schemas.chat import ChatRequest, ChatResponse, PublicChatRequest
-from foundry.schemas.deployment import DeploymentCreate, DeploymentResponse
+from foundry.schemas.deployment import DeploymentCreate, DeploymentResponse, DeploymentUpdate
 from foundry.schemas.error import ErrorResponse
 from foundry.schemas.evaluation import (
     EvaluationMetric,
@@ -27,6 +27,7 @@ __all__ = [
     "PublicChatRequest",
     "DeploymentCreate",
     "DeploymentResponse",
+    "DeploymentUpdate",
     "ErrorResponse",
     "PipelineCreate",
     "PipelineResponse",

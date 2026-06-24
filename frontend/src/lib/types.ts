@@ -8,6 +8,8 @@ export type ViewName =
 
 export type Strategy = "rag" | "tag" | "cag";
 export type ProviderName = "openai" | "anthropic";
+export type DeploymentEnvironment = "preview" | "production";
+export type DeploymentStatus = "running" | "stopped";
 
 export interface Health {
   status: string;
@@ -62,7 +64,8 @@ export interface Deployment {
   pipeline_id: string;
   slug: string;
   version: number;
-  status: "preview" | "production";
+  environment: DeploymentEnvironment;
+  status: DeploymentStatus;
   created_at: string;
 }
 
