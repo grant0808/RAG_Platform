@@ -7,6 +7,7 @@ from foundry.services.conversations import ConversationService
 from foundry.services.knowledge import KnowledgeIndex
 from foundry.services.orchestrator import Orchestrator
 from foundry.services.pipelines import PipelineService
+from foundry.services.provider_quota import ProviderQuotaService
 from foundry.services.providers import ProviderClient, ProviderService
 from foundry.services.sources import SourceService
 from foundry.services.tables import TableStore
@@ -18,6 +19,7 @@ class Container:
     database: Database
     providers: ProviderService
     provider_client: ProviderClient
+    provider_quota: ProviderQuotaService
     conversations: ConversationService
     pipelines: PipelineService
     sources: SourceService
@@ -30,6 +32,7 @@ class Container:
         database = Database(settings.database_url)
         cipher = CredentialCipher(settings.master_key_path)
         provider_client = ProviderClient(settings.provider_timeout_seconds)
+        provider_quota = ProviderQuotaService(settings)
         providers = ProviderService(cipher, provider_client)
         conversations = ConversationService()
         knowledge = KnowledgeIndex()
@@ -42,6 +45,7 @@ class Container:
             database=database,
             providers=providers,
             provider_client=provider_client,
+            provider_quota=provider_quota,
             conversations=conversations,
             pipelines=pipelines,
             sources=sources,

@@ -11,6 +11,10 @@ class ChatSessionCreate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=160)
 
 
+class ChatSessionUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+
+
 class ChatSessionResponse(OrmModel):
     id: str
     pipeline_id: str

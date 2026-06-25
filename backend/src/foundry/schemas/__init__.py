@@ -5,6 +5,7 @@ from foundry.schemas.conversation import (
     ChatMessageResponse,
     ChatSessionCreate,
     ChatSessionResponse,
+    ChatSessionUpdate,
 )
 from foundry.schemas.deployment import DeploymentCreate, DeploymentResponse, DeploymentUpdate
 from foundry.schemas.error import ErrorResponse
@@ -32,6 +33,7 @@ __all__ = [
     "ChatMessageResponse",
     "ChatSessionCreate",
     "ChatSessionResponse",
+    "ChatSessionUpdate",
     "PublicChatRequest",
     "DeploymentCreate",
     "DeploymentResponse",

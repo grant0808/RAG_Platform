@@ -122,6 +122,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ pipeline_id: pipelineId, title: title || null }),
     }),
+  updateChatSession: (sessionId: string, title: string) =>
+    request<ChatSession>(`/chat/sessions/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
   listChatSessions: (pipelineId: string) =>
     request<ChatSession[]>(`/chat/sessions?pipeline_id=${encodeURIComponent(pipelineId)}`),
   listChatMessages: (sessionId: string) =>

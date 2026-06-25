@@ -86,13 +86,22 @@ export interface TraceEvent {
 export interface ChatResponse {
   session_id: string | null;
   answer: string;
-  strategy: Strategy;
+  strategy: string;
   provider: string;
   model: string;
   citations: Citation[];
   trace: TraceEvent[];
   usage: Record<string, number>;
   cached: boolean;
+  token_status?: {
+    budget: number;
+    used_total: number;
+    used_input: number;
+    used_output: number;
+    remaining: number;
+    message_count: number;
+  };
+  provider_quota?: Record<string, unknown>;
 }
 
 export interface ChatSession {

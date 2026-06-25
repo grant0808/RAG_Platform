@@ -33,6 +33,7 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
   const [messages, setMessages] = useState<Message[]>([EMPTY_MESSAGE]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionTitleDraft, setSessionTitleDraft] = useState("");
   const [traces, setTraces] = useState<TraceEvent[]>([]);
   const [strategy, setStrategy] = useState<Strategy>(pipeline?.strategy ?? "rag");
   const [running, setRunning] = useState(false);
@@ -50,6 +51,7 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
     if (!pipeline) return;
     setStrategy(pipeline.strategy);
     setActiveSessionId(null);
+    setSessionTitleDraft("");
     setMessages([EMPTY_MESSAGE]);
     setTraces([]);
     void loadSessions(pipeline.id);
@@ -59,6 +61,7 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
 
   async function loadMessages(sessionId: string) {
     setActiveSessionId(sessionId);
+    setSessionTitleDraft(sessions.find((session) => session.id === sessionId)?.title ?? "");
     setTraces([]);
     try {
       const history = await api.listChatMessages(sessionId);
@@ -82,6 +85,7 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
       const session = await api.createChatSession(pipeline.id);
       setSessions((current) => [session, ...current]);
       setActiveSessionId(session.id);
+      setSessionTitleDraft(session.title);
       setMessages([EMPTY_MESSAGE]);
       setTraces([]);
     } catch (caught) {
@@ -95,10 +99,31 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
     try {
       await api.deleteChatSession(activeSessionId);
       setActiveSessionId(null);
+      setSessionTitleDraft("");
       setMessages([EMPTY_MESSAGE]);
       await loadSessions(currentPipeline.id);
     } catch (caught) {
       notify(caught instanceof Error ? caught.message : "대화 삭제에 실패했습니다.");
+    }
+  }
+
+  async function renameSession() {
+    if (!activeSessionId || !pipeline) return;
+    const title = sessionTitleDraft.trim();
+    if (!title) {
+      notify("session 이름을 입력하세요.");
+      return;
+    }
+    try {
+      const updated = await api.updateChatSession(activeSessionId, title);
+      setSessions((current) =>
+        current.map((session) => (session.id === updated.id ? updated : session)),
+      );
+      setSessionTitleDraft(updated.title);
+      notify("session 이름을 저장했습니다.");
+      await loadSessions(pipeline.id);
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "session 이름 저장에 실패했습니다.");
     }
   }
 
@@ -122,6 +147,8 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
         onCitation: (citation) => setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, citations: [...(message.citations ?? []), citation] } : message)),
         onDone: (result) => {
           setActiveSessionId(result.session_id);
+          const knownSession = sessions.find((session) => session.id === result.session_id);
+          if (knownSession) setSessionTitleDraft(knownSession.title);
           setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, text: result.answer, result, citations: result.citations } : message));
           setTraces(result.trace);
           void loadSessions(pipeline.id);
@@ -149,14 +176,14 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
   return (
     <section className="page playground-page">
       <PageHeading index="05" title="Test with" outline="evidence." description="SSE token과 LangChain 실행 trace를 같은 시간축에서 확인합니다." action={<button className="button" disabled={running} onClick={() => void evaluate()}>Run evaluation</button>} />
-      <div className="playground-toolbar"><label><span>PIPELINE</span><select value={pipeline.id} onChange={(event) => { const selected = snapshot.pipelines.find((item) => item.id === event.target.value); onSelectPipeline(event.target.value); if (selected) setStrategy(selected.strategy); }}>{snapshot.pipelines.map((item) => <option key={item.id} value={item.id}>{item.name} / v{item.current_version}</option>)}</select></label><label><span>SESSION</span><select value={activeSessionId ?? ""} onChange={(event) => { if (event.target.value) void loadMessages(event.target.value); else { setActiveSessionId(null); setMessages([EMPTY_MESSAGE]); } }}><option value="">New auto session</option>{sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>)}</select></label><label><span>STRATEGY OVERRIDE</span><select value={strategy} onChange={(event) => setStrategy(event.target.value as Strategy)}><option value="rag">RAG</option><option value="tag">TAG</option><option value="cag">CAG</option></select></label><div><span>MODEL</span><strong>{pipeline.provider} / {pipeline.model}</strong></div></div>
+      <div className="playground-toolbar"><label><span>PIPELINE</span><select value={pipeline.id} onChange={(event) => { const selected = snapshot.pipelines.find((item) => item.id === event.target.value); onSelectPipeline(event.target.value); if (selected) setStrategy(selected.strategy); }}>{snapshot.pipelines.map((item) => <option key={item.id} value={item.id}>{item.name} / v{item.current_version}</option>)}</select></label><label><span>SESSION</span><select value={activeSessionId ?? ""} onChange={(event) => { if (event.target.value) void loadMessages(event.target.value); else { setActiveSessionId(null); setSessionTitleDraft(""); setMessages([EMPTY_MESSAGE]); } }}><option value="">New auto session</option>{sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>)}</select></label><label><span>STRATEGY OVERRIDE</span><select value={strategy} onChange={(event) => setStrategy(event.target.value as Strategy)}><option value="rag">RAG</option><option value="tag">TAG</option><option value="cag">CAG</option></select></label><div><span>MODEL</span><strong>{pipeline.provider} / {pipeline.model}</strong></div></div>
       <div className="playground-layout">
         <div className="chat-panel">
-          <div className="session-actions"><button className="button" disabled={running} onClick={() => void newSession()}>New chat</button><button className="button danger" disabled={running || !activeSessionId} onClick={() => void deleteSession()}>Delete chat</button><span>{activeSessionId ? `SESSION ${activeSessionId.slice(0, 8)}` : "AUTO SESSION ON FIRST MESSAGE"}</span></div>
+          <div className="session-actions"><button className="button" disabled={running} onClick={() => void newSession()}>New chat</button><input value={sessionTitleDraft} disabled={!activeSessionId || running} placeholder="Session name" maxLength={160} onChange={(event) => setSessionTitleDraft(event.target.value)} /><button className="button" disabled={running || !activeSessionId} onClick={() => void renameSession()}>Save name</button><button className="button danger" disabled={running || !activeSessionId} onClick={() => void deleteSession()}>Delete chat</button><span>{activeSessionId ? `SESSION ${activeSessionId.slice(0, 8)}` : "AUTO SESSION ON FIRST MESSAGE"}</span></div>
           <div className="messages" aria-live="polite">
             {messages.map((message) => <article key={message.id} className={`message ${message.role}`}><span>{message.role === "user" ? "YOU" : `FOUNDRY / ${message.result?.strategy?.toUpperCase() ?? "READY"}`}</span><div>{message.text || <span className="typing">RUNNING<span>...</span></span>}</div>{message.citations && message.citations.length > 0 && <footer>{message.citations.map((citation, index) => <span key={`${citation.source_id}-${index}`}>{citation.source_name} · {citation.location ?? "source"}</span>)}</footer>}</article>)}
           </div>
-          <form className="composer" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; void submit(new FormData(form)).then(() => form.reset()); }}><textarea name="message" placeholder="예: Foundry의 응답 속도 목표는?" required maxLength={20000} /><button disabled={running} aria-label="질문 전송">{running ? "…" : "↑"}</button></form>
+          <form className="composer" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; void submit(new FormData(form)).then(() => form.reset()); }}><textarea name="message" placeholder="예: Foundry의 응답 속도 목표는? /status 로 token 사용량 확인" required maxLength={20000} /><button disabled={running} aria-label="질문 전송">{running ? "…" : "↑"}</button></form>
         </div>
         <aside className="trace-panel">
           <header><span>LIVE / LANGCHAIN TRACE</span><h2>Runnable execution</h2></header>

@@ -379,3 +379,116 @@ def test_stream_chat_persists_session_and_uses_history(client, app, monkeypatch)
         "user",
         "assistant",
     ]
+
+
+def test_chat_session_title_can_be_set_and_renamed(client):
+    connect_provider(client)
+    pipeline = create_pipeline(client, "rag")
+    created = client.post(
+        "/api/v1/chat/sessions",
+        json={"pipeline_id": pipeline["id"], "title": "초기 대화 이름"},
+    )
+    assert created.status_code == 201
+
+    renamed = client.patch(
+        f"/api/v1/chat/sessions/{created.json()['id']}",
+        json={"title": "  운영 FAQ 테스트  "},
+    )
+
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "운영 FAQ 테스트"
+    sessions = client.get(f"/api/v1/chat/sessions?pipeline_id={pipeline['id']}").json()
+    assert sessions[0]["title"] == "운영 FAQ 테스트"
+
+
+def test_status_command_reports_session_token_usage_without_model_call(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("status.txt", "Token usage guide")},
+    )
+    pipeline = create_pipeline(client, "rag")
+    first = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "토큰 사용량을 만들 질문"},
+    )
+    assert first.status_code == 200
+    session_id = first.json()["session_id"]
+    model_calls = len(FakeChatModel.seen_messages)
+
+    status_response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "session_id": session_id, "message": "/status"},
+    )
+
+    assert status_response.status_code == 200
+    assert len(FakeChatModel.seen_messages) == model_calls
+    body = status_response.json()
+    assert body["strategy"] == "status"
+    assert "Used total: 28 tokens" in body["answer"]
+    assert "Remaining: 99,972 tokens" in body["answer"]
+    assert body["provider_quota"]["openai"]["configured"] is False
+
+
+def test_status_command_streams_token_usage(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+    first = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "스트림 status 준비"},
+    )
+    session_id = first.json()["session_id"]
+
+    with client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        json={"pipeline_id": pipeline["id"], "session_id": session_id, "message": "/status"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: token" in body
+    assert "Session token status" in body
+    assert "event: done" in body
+
+
+def test_status_command_includes_provider_quota(client, app, monkeypatch):
+    connect_provider(client)
+    pipeline = create_pipeline(client, "rag")
+
+    async def fake_status():
+        return {
+            "period": {
+                "start": "2026-06-01T00:00:00Z",
+                "end": "2026-06-25T00:00:00Z",
+                "bucket_width": "1d",
+            },
+            "openai": {
+                "configured": True,
+                "usage": {"available": True, "total_tokens": 1234, "tokens": {}, "requests": {}},
+                "cost": {"available": True, "amount": 0.42, "currency": "USD"},
+                "remaining": {"available": False, "reason": "not exposed"},
+            },
+            "anthropic": {
+                "configured": True,
+                "usage": {"available": True, "total_tokens": 500, "tokens": {}, "requests": {}},
+                "cost": {"available": True, "amount": 0.2, "currency": "USD"},
+                "remaining": {"available": True, "remaining_usd": 99.8},
+            },
+        }
+
+    monkeypatch.setattr(app.state.container.provider_quota, "status", fake_status)
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "/status"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider_quota"]["openai"]["usage"]["total_tokens"] == 1234
+    assert body["provider_quota"]["anthropic"]["remaining"]["remaining_usd"] == 99.8
+    assert "OpenAI: used 1,234 tokens" in body["answer"]
+    assert "Anthropic: used 500 tokens" in body["answer"]

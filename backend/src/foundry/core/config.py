@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     chunk_overlap: int = 120
     cache_ttl_seconds: int = 300
     fake_llm_enabled: bool = False
+    chat_session_token_budget: int = 100_000
+    openai_admin_api_key: SecretStr | None = None
+    anthropic_admin_api_key: SecretStr | None = None
 
     def prepare_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

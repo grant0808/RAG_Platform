@@ -42,6 +42,7 @@
 | Chat Session | POST | `/chat/sessions` | 201 | 대화 session 생성 |
 | Chat Session | GET | `/chat/sessions` | 200 | 대화 session 목록 |
 | Chat Session | GET | `/chat/sessions/{session_id}/messages` | 200 | session 메시지 목록 |
+| Chat Session | PATCH | `/chat/sessions/{session_id}` | 200 | session 이름 변경 |
 | Chat Session | DELETE | `/chat/sessions/{session_id}` | 204 | 대화 session 삭제 |
 | Chat | POST | `/chat` | 200 | Pipeline 채팅 실행 |
 | Chat | POST | `/chat/stream` | 200 | SSE 채팅 실행 |
@@ -186,6 +187,8 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 | `strategy` | enum \| null | X | 미지정 시 Pipeline 전략; `rag`, `tag`, `cag` |
 | `session_id` | string \| null | X | 기존 대화 session ID; 미지정 시 새 session 자동 생성 |
 
+`message`가 정확히 `/status`이면 모델을 호출하지 않고 해당 session의 token 사용량 상태를 반환한다. `FOUNDRY_OPENAI_ADMIN_API_KEY`, `FOUNDRY_ANTHROPIC_ADMIN_API_KEY`가 설정되어 있으면 Provider Admin API의 실제 사용량·비용도 함께 조회한다.
+
 ### ChatResponse
 
 ```json
@@ -218,6 +221,54 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 
 `citation.score`와 `location`, `trace.duration_ms`는 `null`일 수 있다. `usage` 키는 Provider SDK가 반환한 사용량 구조에 따라 달라질 수 있다.
 
+`/status` command 응답은 `strategy: "status"`, `provider: "system"`, `model: "local-command"`를 반환하며 `token_status`와 `provider_quota` 객체를 추가로 포함한다.
+
+```json
+{
+  "session_id": "c9b2...",
+  "answer": "Session token status\n- Budget: 100,000 tokens\n- Used total: 368 tokens ...",
+  "strategy": "status",
+  "provider": "system",
+  "model": "local-command",
+  "citations": [],
+  "trace": [],
+  "usage": {},
+  "cached": false,
+  "token_status": {
+    "budget": 100000,
+    "used_total": 368,
+    "used_input": 320,
+    "used_output": 48,
+    "remaining": 99632,
+    "message_count": 1
+  },
+  "provider_quota": {
+    "period": {
+      "start": "2026-06-01T00:00:00Z",
+      "end": "2026-06-25T00:00:00Z",
+      "bucket_width": "1d"
+    },
+    "openai": {
+      "configured": true,
+      "usage": {"available": true, "total_tokens": 1234, "tokens": {}, "requests": {}},
+      "cost": {"available": true, "amount": 0.42, "currency": "USD"},
+      "remaining": {
+        "available": false,
+        "reason": "OpenAI usage/cost endpoints return actual usage and cost, not a universal remaining quota value."
+      }
+    },
+    "anthropic": {
+      "configured": true,
+      "usage": {"available": true, "total_tokens": 500, "tokens": {}, "requests": {}},
+      "cost": {"available": true, "amount": 0.2, "currency": "USD"},
+      "remaining": {"available": true, "remaining_usd": 99.8}
+    }
+  }
+}
+```
+
+Provider Admin API key가 없으면 해당 provider는 `configured: false`와 설정 안내 reason을 반환한다. Admin key가 거부되거나 권한이 부족하면 `available: false`, `status_code`, `error`를 반환한다. OpenAI는 조직 usage/cost 조회를 지원하지만 범용 remaining quota 값은 제공하지 않는다. Anthropic remaining은 Claude Enterprise Spend Limits API 권한이 있을 때만 계산된다.
+
 ### ChatSessionCreate / ChatSessionResponse
 
 ```json
@@ -233,6 +284,18 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 | `title` | string \| null | X | 1~160자; 미지정 시 첫 user 메시지에서 자동 생성 |
 
 응답은 `id`, `pipeline_id`, `title`, `created_at`, `updated_at`을 반환한다.
+
+### ChatSessionUpdate
+
+```json
+{
+  "title": "운영 FAQ 테스트"
+}
+```
+
+| 요청 필드 | 타입 | 필수 | 규칙 |
+|---|---|---:|---|
+| `title` | string | O | 1~160자; 앞뒤 공백과 중복 공백은 정리되어 저장 |
 
 ### ChatMessageResponse
 
@@ -403,6 +466,10 @@ Pipeline에 연결된 빈 대화 session을 생성한다. 명시적으로 생성
 
 대화 session에 저장된 user/assistant 메시지를 생성 순서대로 반환한다.
 
+#### `PATCH /chat/sessions/{session_id}`
+
+대화 session 이름을 변경한다. 변경된 이름은 session 목록과 Playground session 선택 UI에 반영된다.
+
 #### `DELETE /chat/sessions/{session_id}`
 
 대화 session과 그 메시지를 삭제하고 본문 없이 204를 반환한다.
@@ -416,6 +483,7 @@ Pipeline에 연결된 빈 대화 session을 생성한다. 명시적으로 생성
 - CAG: `pipeline_id:version:normalized_question` 키로 캐시를 조회하고 miss 시 RAG로 fallback한다.
 - `session_id`가 있으면 이전 user/assistant 메시지를 모델 입력에 포함하고, 없으면 새 session을 만든다.
 - user 메시지와 assistant 응답은 `chat_messages`에 저장된다.
+- `/status`는 저장된 assistant 메시지의 `usage.total_tokens`를 합산해 session 내부 예산 대비 사용량과 잔여량을 반환한다. 예산은 `FOUNDRY_CHAT_SESSION_TOKEN_BUDGET` 설정값이다. Admin API key가 설정되어 있으면 OpenAI/Anthropic의 실제 월간 usage/cost도 조회한다. Provider가 remaining quota를 API로 노출하지 않거나 권한이 부족하면 해당 필드는 unavailable로 표시한다.
 
 TAG에 표 Source가 없으면 409를 반환한다. Provider가 연결되지 않았거나 모델 호출에 실패해도 요청은 실패한다.
 

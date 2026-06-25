@@ -3,7 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from foundry.api.dependencies import get_container, get_session
 from foundry.core.container import Container
-from foundry.schemas import ChatMessageResponse, ChatSessionCreate, ChatSessionResponse
+from foundry.schemas import (
+    ChatMessageResponse,
+    ChatSessionCreate,
+    ChatSessionResponse,
+    ChatSessionUpdate,
+)
 
 router = APIRouter(prefix="/chat/sessions", tags=["chat"])
 
@@ -43,6 +48,17 @@ async def list_chat_messages(
 ) -> list[ChatMessageResponse]:
     messages = await container.conversations.list_messages(session, session_id)
     return [ChatMessageResponse.model_validate(item) for item in messages]
+
+
+@router.patch("/{session_id}", response_model=ChatSessionResponse)
+async def update_chat_session(
+    session_id: str,
+    payload: ChatSessionUpdate,
+    session: AsyncSession = Depends(get_session),
+    container: Container = Depends(get_container),
+) -> ChatSessionResponse:
+    chat_session = await container.conversations.update(session, session_id, payload)
+    return ChatSessionResponse.model_validate(chat_session)
 
 
 @router.delete(

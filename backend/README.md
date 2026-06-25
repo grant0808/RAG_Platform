@@ -37,6 +37,18 @@ uv run uvicorn foundry.main:app --reload
 
 `.env.example`의 `FOUNDRY_FAKE_LLM_ENABLED=true`는 외부 API를 호출하지 않는 결정적 로컬 모델을 활성화합니다. 실제 OpenAI 또는 Anthropic API를 시험할 때는 이 값을 `false`로 바꾸고 Provider API로 실제 키를 등록합니다.
 
+채팅창에서 `/status`를 입력하면 현재 chat session에 저장된 assistant 응답의 token 사용량 합계와 잔여량을 확인할 수 있습니다. 기본 잔여량은 `FOUNDRY_CHAT_SESSION_TOKEN_BUDGET` 기준의 앱 내부 예산입니다.
+
+실제 Provider 사용량·비용도 함께 보려면 `.env`에 Admin API key를 추가합니다. 이 키는 `/providers`에 등록하는 일반 inference key와 별개입니다.
+
+```env
+FOUNDRY_OPENAI_ADMIN_API_KEY=...
+FOUNDRY_ANTHROPIC_ADMIN_API_KEY=...
+```
+
+- OpenAI: 조직 completions usage와 costs API를 조회해 월간 token/cost를 표시합니다. 사용량 API는 범용 “잔여 quota” 값을 직접 반환하지 않으므로 remaining은 unavailable로 표시합니다.
+- Anthropic: Usage & Cost Admin API를 조회하고, Claude Enterprise의 Spend Limits API 권한이 있으면 period-to-date spend 기준 remaining USD도 표시합니다. 일반 Claude Platform에서는 spend limits가 unavailable일 수 있습니다.
+
 빈 데이터베이스만 생성하려면 다음 명령을 사용합니다.
 
 ```bash

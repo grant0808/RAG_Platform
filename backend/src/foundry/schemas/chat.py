@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from foundry.schemas.base import Citation, StrategyName, TraceEvent
@@ -25,3 +27,5 @@ class ChatResponse(BaseModel):
     trace: list[TraceEvent] = Field(default_factory=list)
     usage: dict[str, int] = Field(default_factory=dict)
     cached: bool = False
+    token_status: dict[str, int] | None = None
+    provider_quota: dict[str, Any] | None = None

@@ -6,13 +6,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from foundry.core.errors import NotFoundError, ValidationError
 from foundry.models import ChatMessage, ChatSession
 from foundry.models.base import utcnow
-from foundry.schemas import ChatSessionCreate
+from foundry.schemas import ChatSessionCreate, ChatSessionUpdate
 
 
 @dataclass(frozen=True)
 class ConversationTurn:
     role: str
     content: str
+
+
+@dataclass(frozen=True)
+class TokenStatus:
+    budget: int
+    used_total: int
+    used_input: int
+    used_output: int
+    remaining: int
+    message_count: int
 
 
 class ConversationService:
@@ -39,6 +49,16 @@ class ConversationService:
         chat_session = await session.get(ChatSession, session_id)
         if chat_session is None:
             raise NotFoundError(f"Chat session not found: {session_id}")
+        return chat_session
+
+    async def update(
+        self, session: AsyncSession, session_id: str, payload: ChatSessionUpdate
+    ) -> ChatSession:
+        chat_session = await self.get(session, session_id)
+        chat_session.title = " ".join(payload.title.strip().split())
+        chat_session.updated_at = utcnow()
+        await session.flush()
+        await session.refresh(chat_session)
         return chat_session
 
     async def ensure(
@@ -82,6 +102,38 @@ class ConversationService:
             if message.role in {"user", "assistant"}
         ]
 
+    async def token_status(
+        self, session: AsyncSession, session_id: str, budget: int
+    ) -> TokenStatus:
+        messages = await self.list_messages(session, session_id)
+        used_input = 0
+        used_output = 0
+        used_total = 0
+        counted_messages = 0
+        for message in messages:
+            if message.role != "assistant":
+                continue
+            usage = message.message_metadata.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            input_tokens = self._usage_int(usage, "input_tokens", "prompt_tokens")
+            output_tokens = self._usage_int(usage, "output_tokens", "completion_tokens")
+            total_tokens = self._usage_int(usage, "total_tokens")
+            if total_tokens == 0:
+                total_tokens = input_tokens + output_tokens
+            used_input += input_tokens
+            used_output += output_tokens
+            used_total += total_tokens
+            counted_messages += 1
+        return TokenStatus(
+            budget=budget,
+            used_total=used_total,
+            used_input=used_input,
+            used_output=used_output,
+            remaining=max(budget - used_total, 0),
+            message_count=counted_messages,
+        )
+
     async def add_message(
         self,
         session: AsyncSession,
@@ -117,3 +169,13 @@ class ConversationService:
         if not title:
             return "New conversation"
         return title[:80]
+
+    @staticmethod
+    def _usage_int(usage: dict[object, object], *keys: str) -> int:
+        for key in keys:
+            value = usage.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float):
+                return int(value)
+        return 0
