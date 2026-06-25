@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useState } from "react";
 
 import { EmptyState, PageHeading } from "@/components/ui";
 import { api, streamChat } from "@/lib/api";
@@ -172,6 +172,12 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
     } finally { setRunning(false); }
   }
 
+  function handleMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (!running) event.currentTarget.form?.requestSubmit();
+  }
+
   const lastResult = [...messages].reverse().find((message) => message.result)?.result;
   return (
     <section className="page playground-page">
@@ -183,7 +189,7 @@ export function PlaygroundView({ snapshot, pipeline, onSelectPipeline, notify }:
           <div className="messages" aria-live="polite">
             {messages.map((message) => <article key={message.id} className={`message ${message.role}`}><span>{message.role === "user" ? "YOU" : `FOUNDRY / ${message.result?.strategy?.toUpperCase() ?? "READY"}`}</span><div>{message.text || <span className="typing">RUNNING<span>...</span></span>}</div>{message.citations && message.citations.length > 0 && <footer>{message.citations.map((citation, index) => <span key={`${citation.source_id}-${index}`}>{citation.source_name} · {citation.location ?? "source"}</span>)}</footer>}</article>)}
           </div>
-          <form className="composer" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; void submit(new FormData(form)).then(() => form.reset()); }}><textarea name="message" placeholder="예: Foundry의 응답 속도 목표는? /status 로 token 사용량 확인" required maxLength={20000} /><button disabled={running} aria-label="질문 전송">{running ? "…" : "↑"}</button></form>
+          <form className="composer" onSubmit={(event) => { event.preventDefault(); const form = event.currentTarget; void submit(new FormData(form)).then(() => form.reset()); }}><textarea name="message" placeholder="예: Foundry의 응답 속도 목표는? /status 로 token 사용량 확인" required maxLength={20000} onKeyDown={handleMessageKeyDown} /><button disabled={running} aria-label="질문 전송">{running ? "…" : "↑"}</button></form>
         </div>
         <aside className="trace-panel">
           <header><span>LIVE / LANGCHAIN TRACE</span><h2>Runnable execution</h2></header>
