@@ -38,9 +38,9 @@ async def test_bootstrap_is_idempotent_and_supports_local_chat(tmp_path):
 
         response = client.post(
             "/api/v1/public/local-rag-preview/chat",
-            json={"message": "Foundry의 응답 속도 목표는?"},
+            json={"message": "What is Foundry's answer latency goal?"},
         )
 
     assert response.status_code == 200
     assert response.json()["model"] == "gpt-local-demo"
-    assert "로컬 테스트 모델" in response.json()["answer"]
+    assert "로컬 deterministic 테스트 모델" in response.json()["answer"]

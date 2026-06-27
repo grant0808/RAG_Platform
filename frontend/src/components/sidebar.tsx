@@ -2,9 +2,9 @@ import type { ViewName } from "@/lib/types";
 
 const navItems: Array<[ViewName, string, string]> = [
   ["overview", "01", "Overview"],
-  ["sources", "02", "Data sources"],
-  ["providers", "03", "Model providers"],
-  ["pipeline", "04", "Pipeline studio"],
+  ["sources", "02", "Sources"],
+  ["providers", "03", "Providers"],
+  ["pipeline", "04", "Pipeline Studio"],
   ["playground", "05", "Playground"],
   ["deployments", "06", "Deployments"],
 ];
@@ -20,11 +20,11 @@ export function Sidebar({
 }) {
   return (
     <aside className={`sidebar ${open ? "open" : ""}`}>
-      <button className="brand" onClick={() => onNavigate("overview")} aria-label="Foundry 홈">
+      <button className="brand" onClick={() => onNavigate("overview")} aria-label="Foundry home">
         <span className="brand-mark">F/</span>
         <span className="brand-word">FOUNDRY</span>
       </button>
-      <nav className="main-nav" aria-label="주요 메뉴">
+      <nav className="main-nav" aria-label="Primary navigation">
         {navItems.map(([id, index, label]) => (
           <button
             key={id}
@@ -38,9 +38,9 @@ export function Sidebar({
       </nav>
       <div className="sidebar-foot">
         <div className="build-card">
-          <span>LOCAL / POC</span>
+          <span>LOCAL / PRODUCT DEMO</span>
           <strong>Auth disabled</strong>
-          <small>외부 네트워크에 직접 공개하지 마세요.</small>
+          <small>로컬 검증용 PoC입니다. 인터넷에 직접 공개하지 마세요.</small>
         </div>
         <div className="account-row">
           <span className="avatar">LC</span>

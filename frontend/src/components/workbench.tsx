@@ -43,7 +43,7 @@ export function Workbench() {
           : next.pipelines[0]?.id ?? null,
       );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "백엔드에 연결할 수 없습니다.");
+      setError(caught instanceof Error ? caught.message : "Backend API에 연결할 수 없습니다.");
     } finally {
       setLoading(false);
     }
@@ -85,9 +85,9 @@ export function Workbench() {
       setSelectedPipelineId(created.id);
       setDialogOpen(false);
       setView("pipeline");
-      setToast(`${created.name} 파이프라인을 생성했습니다.`);
+      setToast(`Pipeline을 생성했습니다: ${created.name}`);
     } catch (caught) {
-      setToast(caught instanceof Error ? caught.message : "파이프라인 생성에 실패했습니다.");
+      setToast(caught instanceof Error ? caught.message : "Pipeline 생성에 실패했습니다.");
     } finally {
       setBusy(false);
     }
@@ -96,19 +96,31 @@ export function Workbench() {
   const viewProps = { snapshot, refresh, notify: setToast };
   let content;
   if (loading) {
-    content = <div className="full-state"><Spinner label="Workbench loading" /></div>;
+    content = (
+      <div className="full-state">
+        <Spinner label="Loading workbench" />
+      </div>
+    );
   } else if (error) {
     content = (
       <div className="full-state error-state">
         <span>BACKEND / OFFLINE</span>
-        <h1>API 연결이 필요합니다.</h1>
+        <h1>API server required.</h1>
         <p>{error}</p>
-        <code>cd backend &amp;&amp; uv run uvicorn foundry.main:app --reload</code>
-        <button className="button primary" onClick={() => void refresh()}>다시 연결</button>
+        <code>cd backend && uv run uvicorn foundry.main:app --reload</code>
+        <button className="button primary" onClick={() => void refresh()}>
+          Retry connection
+        </button>
       </div>
     );
   } else if (view === "overview") {
-    content = <OverviewView {...viewProps} onNavigate={navigate} onSelectPipeline={setSelectedPipelineId} />;
+    content = (
+      <OverviewView
+        {...viewProps}
+        onNavigate={navigate}
+        onSelectPipeline={setSelectedPipelineId}
+      />
+    );
   } else if (view === "sources") {
     content = <SourcesView {...viewProps} />;
   } else if (view === "providers") {
@@ -144,16 +156,16 @@ export function Workbench() {
           <button
             className="menu-button"
             onClick={() => setMenuOpen((open) => !open)}
-            aria-label="메뉴 열기"
+            aria-label="Open navigation"
             aria-expanded={menuOpen}
           >
-            ☰
+            =
           </button>
           <div className="workspace-switcher">
             <span className="signal-dot" />
             <span>Personal lab</span>
             <span className="slash">/</span>
-            <strong>{selectedPipeline?.name ?? "No pipeline"}</strong>
+            <strong>{selectedPipeline?.name ?? "No pipeline selected"}</strong>
           </div>
           <div className="top-actions">
             <span className="api-state">API {snapshot.health?.status.toUpperCase()}</span>
@@ -177,19 +189,63 @@ export function Workbench() {
             onMouseDown={(event) => event.stopPropagation()}
           >
             <span className="eyebrow">NEW / PIPELINE</span>
-            <button type="button" className="modal-close" onClick={() => setDialogOpen(false)} aria-label="닫기">×</button>
-            <h2>지식 흐름을<br />설계하세요.</h2>
-            <label className="field"><span>Name</span><input name="name" defaultValue="Local knowledge assistant" required maxLength={120} /></label>
+            <button
+              type="button"
+              className="modal-close"
+              onClick={() => setDialogOpen(false)}
+              aria-label="Close"
+            >
+              x
+            </button>
+            <h2>
+              실행 가능한
+              <br />
+              knowledge pipeline을 설계하세요.
+            </h2>
+            <label className="field">
+              <span>Name</span>
+              <input name="name" defaultValue="Local knowledge assistant" required maxLength={120} />
+            </label>
             <div className="field-pair">
-              <label className="field"><span>Strategy</span><select name="strategy" defaultValue="rag"><option value="rag">RAG</option><option value="tag">TAG</option><option value="cag">CAG</option></select></label>
-              <label className="field"><span>Provider</span><select name="provider" defaultValue={firstProvider?.provider ?? "openai"}>{snapshot.providers.map((provider) => <option key={provider.provider} value={provider.provider}>{provider.provider}</option>)}</select></label>
+              <label className="field">
+                <span>Strategy</span>
+                <select name="strategy" defaultValue="rag">
+                  <option value="rag">RAG</option>
+                  <option value="tag">TAG</option>
+                  <option value="cag">CAG</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Provider</span>
+                <select name="provider" defaultValue={firstProvider?.provider ?? "openai"}>
+                  {snapshot.providers.map((provider) => (
+                    <option key={provider.provider} value={provider.provider}>
+                      {provider.provider}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-            <label className="field"><span>Model ID</span><input name="model" defaultValue={firstProvider?.models[0] ?? "gpt-local-demo"} required /></label>
-            <div className="modal-actions"><button type="button" className="button" onClick={() => setDialogOpen(false)}>Cancel</button><button className="button primary" disabled={busy || !snapshot.providers.length}>{busy ? "Creating…" : "Create pipeline →"}</button></div>
+            <label className="field">
+              <span>Model ID</span>
+              <input name="model" defaultValue={firstProvider?.models[0] ?? "gpt-local-demo"} required />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="button" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </button>
+              <button className="button primary" disabled={busy || !snapshot.providers.length}>
+                {busy ? "Creating..." : "Create pipeline"}
+              </button>
+            </div>
           </form>
         </div>
       )}
-      {toast && <div className="toast" role="status">{toast}</div>}
+      {toast && (
+        <div className="toast" role="status">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

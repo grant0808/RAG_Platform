@@ -26,10 +26,10 @@ export function DeploymentsView({
         String(form.get("slug") || ""),
         String(form.get("environment")) as DeploymentEnvironment,
       );
-      notify(`${deployment.slug} 배포를 생성했습니다.`);
+      notify(`${deployment.slug} deployment를 생성했습니다.`);
       await refresh();
     } catch (caught) {
-      notify(caught instanceof Error ? caught.message : "배포 생성에 실패했습니다.");
+      notify(caught instanceof Error ? caught.message : "Deployment 생성에 실패했습니다.");
     } finally {
       setCreating(false);
     }
@@ -46,7 +46,7 @@ export function DeploymentsView({
       await action();
       await refresh();
     } catch (caught) {
-      notify(caught instanceof Error ? caught.message : "배포 변경에 실패했습니다.");
+      notify(caught instanceof Error ? caught.message : "Deployment 변경에 실패했습니다.");
     } finally {
       setBusyId(null);
     }
@@ -55,7 +55,7 @@ export function DeploymentsView({
   async function changeEnvironment(deployment: Deployment, environment: DeploymentEnvironment) {
     await mutateDeployment(deployment, async () => {
       await api.updateDeployment(deployment.id, { environment });
-      notify(`${deployment.slug} 환경을 ${environment}으로 변경했습니다.`);
+      notify(`${deployment.slug} environment를 ${environment}로 변경했습니다.`);
     });
   }
 
@@ -63,19 +63,19 @@ export function DeploymentsView({
     await mutateDeployment(deployment, async () => {
       if (deployment.status === "running") {
         await api.stopDeployment(deployment.id);
-        notify(`${deployment.slug} 배포를 중지했습니다.`);
+        notify(`${deployment.slug} deployment를 중지했습니다.`);
       } else {
         await api.runDeployment(deployment.id);
-        notify(`${deployment.slug} 배포를 실행했습니다.`);
+        notify(`${deployment.slug} deployment를 실행했습니다.`);
       }
     });
   }
 
   async function deleteDeployment(deployment: Deployment) {
-    if (!window.confirm(`/${deployment.slug} 배포를 삭제할까요?`)) return;
+    if (!window.confirm(`/${deployment.slug} deployment를 삭제할까요?`)) return;
     await mutateDeployment(deployment, async () => {
       await api.deleteDeployment(deployment.id);
-      notify(`${deployment.slug} 배포를 삭제했습니다.`);
+      notify(`${deployment.slug} deployment를 삭제했습니다.`);
     });
   }
 
@@ -85,7 +85,7 @@ export function DeploymentsView({
         index="06"
         title="Deploy once."
         outline="Observe always."
-        description="배포는 불변 Pipeline Version을 가리키며, 실행 상태와 Preview/Production 환경은 별도로 변경합니다."
+        description="Deployment는 immutable pipeline version을 고정합니다. Draft를 바꿔도 public endpoint는 안정적으로 유지되며, 중지, 재실행, 삭제할 수 있습니다."
       />
       <form
         className="deployment-form"
@@ -106,13 +106,7 @@ export function DeploymentsView({
         </label>
         <label>
           <span>SLUG / OPTIONAL</span>
-          <input
-            name="slug"
-            placeholder="support-bot"
-            pattern="[a-zA-Z0-9-]+"
-            minLength={3}
-            maxLength={80}
-          />
+          <input name="slug" placeholder="support-bot" pattern="[a-zA-Z0-9-]+" minLength={3} maxLength={80} />
         </label>
         <label>
           <span>ENVIRONMENT</span>
@@ -122,7 +116,7 @@ export function DeploymentsView({
           </select>
         </label>
         <button className="button acid" disabled={creating || !snapshot.pipelines.length}>
-          {creating ? "Deploying…" : "Create deployment →"}
+          {creating ? "Deploying..." : "Create deployment"}
         </button>
       </form>
       <div className="section-title">
@@ -130,8 +124,8 @@ export function DeploymentsView({
         <span>{snapshot.deployments.length} ENDPOINTS</span>
       </div>
       {snapshot.deployments.length === 0 ? (
-        <EmptyState title="배포가 없습니다.">
-          현재 Pipeline 버전을 Preview endpoint로 고정하세요.
+        <EmptyState title="아직 deployment가 없습니다.">
+          현재 pipeline version을 preview endpoint로 고정하세요.
         </EmptyState>
       ) : (
         <div className="deployment-list">
@@ -146,7 +140,7 @@ export function DeploymentsView({
                     <div>
                       <span>DEPLOYMENT / {deployment.id.slice(0, 8)}</span>
                       <h2>{pipeline?.name ?? "Deleted pipeline"}</h2>
-                      <p>VERSION {deployment.version} · {formatDate(deployment.created_at)}</p>
+                      <p>Version {deployment.version} / {formatDate(deployment.created_at)}</p>
                     </div>
                     <div className="deployment-badges">
                       <StatusBadge tone={deployment.environment === "production" ? "ok" : "preview"}>
@@ -163,31 +157,20 @@ export function DeploymentsView({
                     <button onClick={() => void copy(endpoint)}>COPY</button>
                   </div>
                   <div className="deployment-actions">
-                    <button
-                      className="button"
-                      disabled={busy}
-                      onClick={() => void toggleRunning(deployment)}
-                    >
+                    <button className="button" disabled={busy} onClick={() => void toggleRunning(deployment)}>
                       {deployment.status === "running" ? "Stop" : "Run"}
                     </button>
                     <select
                       disabled={busy}
                       value={deployment.environment}
                       onChange={(event) =>
-                        void changeEnvironment(
-                          deployment,
-                          event.target.value as DeploymentEnvironment,
-                        )
+                        void changeEnvironment(deployment, event.target.value as DeploymentEnvironment)
                       }
                     >
                       <option value="preview">Preview</option>
                       <option value="production">Production</option>
                     </select>
-                    <button
-                      className="button danger"
-                      disabled={busy}
-                      onClick={() => void deleteDeployment(deployment)}
-                    >
+                    <button className="button danger" disabled={busy} onClick={() => void deleteDeployment(deployment)}>
                       Delete
                     </button>
                   </div>
