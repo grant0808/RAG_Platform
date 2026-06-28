@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 from io import BytesIO
 from typing import Any
 
@@ -48,10 +49,11 @@ async def bootstrap_local(settings: Settings | None = None) -> dict[str, Any]:
                 select(ProviderConnection).where(ProviderConnection.provider == "openai")
             )
             if provider is None:
+                provider_key = _openai_provider_key(app_settings)
                 provider = await container.providers.connect(
                     session,
                     "openai",
-                    LOCAL_PROVIDER_KEY,
+                    provider_key,
                     validate_connection=False,
                 )
             summary["provider"] = provider.provider
@@ -79,7 +81,11 @@ async def bootstrap_local(settings: Settings | None = None) -> dict[str, Any]:
                             name=name,
                             strategy=strategy,
                             provider="openai",
-                            model="gpt-local-demo",
+                            model=(
+                                "gpt-local-demo"
+                                if app_settings.fake_llm_enabled
+                                else app_settings.openai_chat_model
+                            ),
                             similarity_threshold=0,
                         ),
                     )
@@ -100,6 +106,17 @@ async def bootstrap_local(settings: Settings | None = None) -> dict[str, Any]:
         return summary
     finally:
         await container.shutdown()
+
+
+def _openai_provider_key(settings: Settings) -> str:
+    for secret in (
+        settings.openai_api_key,
+        settings.openai_embedding_api_key,
+        settings.openai_admin_api_key,
+    ):
+        if secret is not None and secret.get_secret_value():
+            return secret.get_secret_value()
+    return os.getenv("OPENAI_API_KEY") or LOCAL_PROVIDER_KEY
 
 
 def main() -> None:

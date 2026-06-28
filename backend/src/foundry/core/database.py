@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -23,15 +23,23 @@ class Database:
     async def create_schema(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
-            try:
+            if connection.dialect.name == "postgresql":
                 await connection.execute(
                     text(
-                        "ALTER TABLE deployments "
-                        "ADD COLUMN environment VARCHAR(24) DEFAULT 'preview'"
+                        "ALTER TABLE deployments ADD COLUMN IF NOT EXISTS "
+                        "environment VARCHAR(24) DEFAULT 'preview'"
                     )
                 )
-            except OperationalError:
-                pass
+            else:
+                try:
+                    await connection.execute(
+                        text(
+                            "ALTER TABLE deployments "
+                            "ADD COLUMN environment VARCHAR(24) DEFAULT 'preview'"
+                        )
+                    )
+                except (OperationalError, ProgrammingError):
+                    pass
             await connection.execute(
                 text(
                     "UPDATE deployments SET environment = status "

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     embedding_provider: str = "openai"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_api_key: SecretStr | None = None
+    openai_api_key: SecretStr | None = None
+    openai_chat_model: str = "gpt-4o-mini"
     redis_url: str = "redis://localhost:6379/0"
     master_key_path: Path = Path(".data/master.key")
     cors_origins: list[str] = Field(

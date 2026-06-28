@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from foundry.cli import bootstrap_local, initialize_database
 from foundry.core.config import Settings
 from foundry.main import create_app
+from foundry.services.knowledge import KnowledgeIndex
 
 
 def local_settings(tmp_path) -> Settings:
@@ -11,6 +12,9 @@ def local_settings(tmp_path) -> Settings:
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'local.db'}",
         vector_store_provider="memory",
         embedding_provider="local",
+        openai_api_key=None,
+        openai_embedding_api_key=None,
+        openai_admin_api_key=None,
         master_key_path=tmp_path / "master.key",
         fake_llm_enabled=True,
     )
@@ -21,6 +25,17 @@ def test_local_bootstrap_settings_avoid_external_embedding_and_vector_services(t
 
     assert settings.embedding_provider == "local"
     assert settings.vector_store_provider == "memory"
+
+
+def test_empty_embedding_key_falls_back_to_admin_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings = Settings(
+        embedding_provider="openai",
+        openai_embedding_api_key="",
+        openai_admin_api_key="admin-test-key",
+    )
+
+    assert KnowledgeIndex(settings)._configured_openai_api_key() == "admin-test-key"
 
 
 async def test_initialize_database_creates_sqlite_schema(tmp_path):

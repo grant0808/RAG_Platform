@@ -305,6 +305,7 @@ class KnowledgeIndex:
             self.settings.fake_llm_enabled
             and self.settings.embedding_provider == "openai"
             and self.settings.openai_embedding_api_key is None
+            and self.settings.openai_api_key is None
             and self.settings.openai_admin_api_key is None
             and not os.getenv("OPENAI_API_KEY")
         )
@@ -321,7 +322,8 @@ class KnowledgeIndex:
         if api_key is None:
             raise ConfigurationError(
                 "OpenAI embeddings require FOUNDRY_OPENAI_EMBEDDING_API_KEY "
-                "or FOUNDRY_OPENAI_ADMIN_API_KEY or OPENAI_API_KEY."
+                "or FOUNDRY_OPENAI_API_KEY or FOUNDRY_OPENAI_ADMIN_API_KEY "
+                "or OPENAI_API_KEY."
             )
         return OpenAIEmbeddings(
             model=self.settings.openai_embedding_model,
@@ -340,7 +342,11 @@ class KnowledgeIndex:
         return PostgresVectorDB(self.settings, embeddings)
 
     def _configured_openai_api_key(self) -> str | None:
-        secret = self.settings.openai_embedding_api_key or self.settings.openai_admin_api_key
-        if secret is not None and secret.get_secret_value():
-            return secret.get_secret_value()
+        for secret in (
+            self.settings.openai_embedding_api_key,
+            self.settings.openai_api_key,
+            self.settings.openai_admin_api_key,
+        ):
+            if secret is not None and secret.get_secret_value():
+                return secret.get_secret_value()
         return os.getenv("OPENAI_API_KEY")

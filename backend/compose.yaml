@@ -1,19 +1,21 @@
 services:
   api:
     build: .
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     environment:
       FOUNDRY_DATA_DIR: /app/.data
-      FOUNDRY_DATABASE_URL: ${FOUNDRY_DATABASE_URL:-postgresql+psycopg://foundry:foundry@postgres:5432/foundry}
-      FOUNDRY_VECTOR_STORE_PROVIDER: ${FOUNDRY_VECTOR_STORE_PROVIDER:-postgres}
-      FOUNDRY_VECTOR_DATABASE_URL: ${FOUNDRY_VECTOR_DATABASE_URL:-postgresql+psycopg://foundry:foundry@postgres:5432/foundry}
+      FOUNDRY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-foundry}:${POSTGRES_PASSWORD:-foundry}@postgres:5432/${POSTGRES_DB:-foundry}
+      FOUNDRY_VECTOR_STORE_PROVIDER: postgres
+      FOUNDRY_VECTOR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-foundry}:${POSTGRES_PASSWORD:-foundry}@postgres:5432/${POSTGRES_DB:-foundry}
       FOUNDRY_VECTOR_COLLECTION_NAME: ${FOUNDRY_VECTOR_COLLECTION_NAME:-foundry_documents}
       FOUNDRY_EMBEDDING_PROVIDER: ${FOUNDRY_EMBEDDING_PROVIDER:-openai}
-      FOUNDRY_OPENAI_EMBEDDING_API_KEY: ${OPENAI_API_KEY:-}
+      FOUNDRY_OPENAI_EMBEDDING_MODEL: ${FOUNDRY_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       FOUNDRY_MASTER_KEY_PATH: /app/.data/master.key
       FOUNDRY_FAKE_LLM_ENABLED: ${FOUNDRY_FAKE_LLM_ENABLED:-false}
-      FOUNDRY_REDIS_URL: ${FOUNDRY_REDIS_URL:-redis://redis:6379/0}
+      FOUNDRY_REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
