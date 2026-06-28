@@ -1,5 +1,6 @@
 import hashlib
 import math
+import os
 import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable
@@ -8,6 +9,11 @@ from dataclasses import dataclass
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_openai import OpenAIEmbeddings
+from langchain_postgres import PGVector
+
+from foundry.core.config import Settings
+from foundry.core.errors import ConfigurationError
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_\uac00-\ud7a3]+", re.UNICODE)
 
@@ -23,11 +29,7 @@ class SearchResult:
 
 
 class LocalHashEmbeddings(Embeddings):
-    """Deterministic local embeddings for a zero-infrastructure PoC.
-
-    This is intentionally simple and must be replaced by a provider embedding model
-    before evaluating semantic retrieval quality.
-    """
+    """Deterministic embeddings used only for tests and explicit local smoke tests."""
 
     def __init__(self, dimensions: int = 384) -> None:
         self.dimensions = dimensions
@@ -49,26 +51,61 @@ class LocalHashEmbeddings(Embeddings):
         return self._embed(text)
 
 
+class PostgresVectorDB:
+    def __init__(self, settings: Settings, embeddings: Embeddings) -> None:
+        self.store = PGVector(
+            embeddings=embeddings,
+            collection_name=settings.vector_collection_name,
+            connection=settings.vector_database_url,
+            use_jsonb=True,
+        )
+
+    def add_documents(self, documents: list[Document]) -> None:
+        self.store.add_documents(
+            documents,
+            ids=[str(document.metadata["knowledge_id"]) for document in documents],
+        )
+
+    def similarity_search_with_score(self, query: str, k: int) -> list[tuple[Document, float]]:
+        return self.store.similarity_search_with_score(query, k=k)
+
+    def reset(self) -> None:
+        try:
+            if hasattr(self.store, "delete_collection"):
+                self.store.delete_collection()
+        except Exception:
+            pass
+        if hasattr(self.store, "create_collection"):
+            self.store.create_collection()
+
+
 class KnowledgeIndex:
-    def __init__(self) -> None:
-        self.embeddings = LocalHashEmbeddings()
-        self.vector_store = InMemoryVectorStore(self.embeddings)
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.vector_store: InMemoryVectorStore | PostgresVectorDB | None = None
         self.documents: list[Document] = []
         self.term_frequencies: list[Counter[str]] = []
         self.document_frequencies: Counter[str] = Counter()
         self.average_document_length = 0.0
+        self._next_document_id = 0
 
     def reset(self) -> None:
-        self.vector_store = InMemoryVectorStore(self.embeddings)
+        if isinstance(self.vector_store, PostgresVectorDB):
+            self.vector_store.reset()
+        elif self.vector_store is not None:
+            self.vector_store = None
         self.documents = []
         self.term_frequencies = []
         self.document_frequencies = Counter()
         self.average_document_length = 0.0
+        self._next_document_id = 0
 
     def add_documents(self, documents: Iterable[Document]) -> int:
-        items = list(documents)
+        items = [self._with_document_id(document) for document in documents]
         if items:
-            self.vector_store.add_documents(items)
+            vector_store = self._vector_store()
+            if vector_store is not None:
+                vector_store.add_documents(items)
             self.documents.extend(items)
             self._rebuild_sparse_index()
         return len(items)
@@ -85,19 +122,34 @@ class KnowledgeIndex:
             return []
 
         candidate_count = min(len(self.documents), candidate_k or max(top_k * 4, top_k))
-        dense_hits = self.vector_store.similarity_search_with_score(query, k=candidate_count)
-        dense_by_id = {id(document): float(score) for document, score in dense_hits}
-        dense_rank = {id(document): rank for rank, (document, _) in enumerate(dense_hits, start=1)}
+        vector_store = self._vector_store()
+        dense_hits = (
+            vector_store.similarity_search_with_score(query, k=candidate_count)
+            if vector_store is not None
+            else []
+        )
+        dense_by_id = {
+            self._document_key(document): self._dense_score(score)
+            for document, score in dense_hits
+            if self._document_key(document) is not None
+        }
+        dense_rank = {
+            self._document_key(document): rank
+            for rank, (document, _) in enumerate(dense_hits, start=1)
+            if self._document_key(document) is not None
+        }
 
         sparse_scores = self._sparse_scores(query, kind=kind)
         sparse_order = sorted(sparse_scores.items(), key=lambda item: item[1], reverse=True)
         sparse_rank = {
-            id(self.documents[index]): rank
+            self._document_key(self.documents[index]): rank
             for rank, (index, score) in enumerate(sparse_order, start=1)
             if score > 0
         }
 
-        document_positions = {id(document): index for index, document in enumerate(self.documents)}
+        document_positions = {
+            self._document_key(document): index for index, document in enumerate(self.documents)
+        }
         candidate_ids = set(dense_rank) | set(sparse_rank)
         if kind:
             candidate_ids = {
@@ -110,7 +162,7 @@ class KnowledgeIndex:
         max_sparse = max(sparse_scores.values(), default=1.0) or 1.0
         results: list[SearchResult] = []
         for document in self.documents:
-            document_id = id(document)
+            document_id = self._document_key(document)
             if document_id not in candidate_ids:
                 continue
             dense_score = dense_by_id.get(document_id, 0.0) / max_dense
@@ -213,5 +265,82 @@ class KnowledgeIndex:
     def _matches_kind(document: Document | None, kind: str) -> bool:
         return bool(document and document.metadata.get("source_kind") == kind)
 
-    def _document_by_id(self, document_id: int) -> Document | None:
-        return next((document for document in self.documents if id(document) == document_id), None)
+    @staticmethod
+    def _document_key(document: Document) -> str | None:
+        value = document.metadata.get("knowledge_id")
+        return str(value) if value is not None else None
+
+    def _document_by_id(self, document_id: str | None) -> Document | None:
+        return next(
+            (
+                document
+                for document in self.documents
+                if self._document_key(document) == document_id
+            ),
+            None,
+        )
+
+    def _with_document_id(self, document: Document) -> Document:
+        metadata = dict(document.metadata)
+        if metadata.get("knowledge_id") is None:
+            metadata["knowledge_id"] = str(self._next_document_id)
+            self._next_document_id += 1
+        return Document(page_content=document.page_content, metadata=metadata)
+
+    @staticmethod
+    def _dense_score(raw_score: float) -> float:
+        return 1 / (1 + max(float(raw_score), 0.0))
+
+    def _vector_store(self) -> InMemoryVectorStore | PostgresVectorDB | None:
+        if self.vector_store is not None:
+            return self.vector_store
+        if self._is_fake_chat_without_embedding_key():
+            return None
+        embeddings = self._build_embeddings()
+        self.vector_store = self._build_vector_store(embeddings)
+        return self.vector_store
+
+    def _is_fake_chat_without_embedding_key(self) -> bool:
+        return (
+            self.settings.fake_llm_enabled
+            and self.settings.embedding_provider == "openai"
+            and self.settings.openai_embedding_api_key is None
+            and self.settings.openai_admin_api_key is None
+            and not os.getenv("OPENAI_API_KEY")
+        )
+
+    def _build_embeddings(self) -> Embeddings:
+        if self.settings.embedding_provider == "local":
+            return LocalHashEmbeddings()
+        if self.settings.embedding_provider != "openai":
+            raise ConfigurationError(
+                f"Unsupported embedding provider: {self.settings.embedding_provider}. "
+                "Supported values: 'openai', 'local'."
+            )
+        api_key = self._configured_openai_api_key()
+        if api_key is None:
+            raise ConfigurationError(
+                "OpenAI embeddings require FOUNDRY_OPENAI_EMBEDDING_API_KEY "
+                "or FOUNDRY_OPENAI_ADMIN_API_KEY or OPENAI_API_KEY."
+            )
+        return OpenAIEmbeddings(
+            model=self.settings.openai_embedding_model,
+            api_key=api_key,
+            chunk_size=1000,
+        )
+
+    def _build_vector_store(self, embeddings: Embeddings) -> InMemoryVectorStore | PostgresVectorDB:
+        if self.settings.vector_store_provider == "memory":
+            return InMemoryVectorStore(embeddings)
+        if self.settings.vector_store_provider != "postgres":
+            raise ConfigurationError(
+                f"Unsupported vector store provider: {self.settings.vector_store_provider}. "
+                "Supported values: 'postgres', 'memory'."
+            )
+        return PostgresVectorDB(self.settings, embeddings)
+
+    def _configured_openai_api_key(self) -> str | None:
+        secret = self.settings.openai_embedding_api_key or self.settings.openai_admin_api_key
+        if secret is not None and secret.get_secret_value():
+            return secret.get_secret_value()
+        return os.getenv("OPENAI_API_KEY")

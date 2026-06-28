@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     data_dir: Path = Path(".data")
     database_url: str = "sqlite+aiosqlite:///./.data/foundry.db"
+    vector_store_provider: str = "postgres"
+    vector_database_url: str = "postgresql+psycopg://foundry:foundry@localhost:5432/foundry"
+    vector_collection_name: str = "foundry_documents"
+    embedding_provider: str = "openai"
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_api_key: SecretStr | None = None
+    redis_url: str = "redis://localhost:6379/0"
     master_key_path: Path = Path(".data/master.key")
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://localhost:4173"]

@@ -35,7 +35,7 @@ class Container:
         provider_quota = ProviderQuotaService(settings)
         providers = ProviderService(cipher, provider_client)
         conversations = ConversationService()
-        knowledge = KnowledgeIndex()
+        knowledge = KnowledgeIndex(settings)
         tables = TableStore(settings.data_dir / "tables.duckdb")
         sources = SourceService(settings, knowledge, tables)
         pipelines = PipelineService(providers)

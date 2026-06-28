@@ -9,9 +9,18 @@ def local_settings(tmp_path) -> Settings:
     return Settings(
         data_dir=tmp_path / "data",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'local.db'}",
+        vector_store_provider="memory",
+        embedding_provider="local",
         master_key_path=tmp_path / "master.key",
         fake_llm_enabled=True,
     )
+
+
+def test_local_bootstrap_settings_avoid_external_embedding_and_vector_services(tmp_path):
+    settings = local_settings(tmp_path)
+
+    assert settings.embedding_provider == "local"
+    assert settings.vector_store_provider == "memory"
 
 
 async def test_initialize_database_creates_sqlite_schema(tmp_path):

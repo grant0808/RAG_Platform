@@ -5,12 +5,79 @@ services:
       - "8000:8000"
     environment:
       FOUNDRY_DATA_DIR: /app/.data
-      FOUNDRY_DATABASE_URL: sqlite+aiosqlite:////app/.data/foundry.db
+      FOUNDRY_DATABASE_URL: ${FOUNDRY_DATABASE_URL:-postgresql+psycopg://foundry:foundry@postgres:5432/foundry}
+      FOUNDRY_VECTOR_STORE_PROVIDER: ${FOUNDRY_VECTOR_STORE_PROVIDER:-postgres}
+      FOUNDRY_VECTOR_DATABASE_URL: ${FOUNDRY_VECTOR_DATABASE_URL:-postgresql+psycopg://foundry:foundry@postgres:5432/foundry}
+      FOUNDRY_VECTOR_COLLECTION_NAME: ${FOUNDRY_VECTOR_COLLECTION_NAME:-foundry_documents}
+      FOUNDRY_EMBEDDING_PROVIDER: ${FOUNDRY_EMBEDDING_PROVIDER:-openai}
+      FOUNDRY_OPENAI_EMBEDDING_API_KEY: ${OPENAI_API_KEY:-}
       FOUNDRY_MASTER_KEY_PATH: /app/.data/master.key
       FOUNDRY_FAKE_LLM_ENABLED: ${FOUNDRY_FAKE_LLM_ENABLED:-false}
+      FOUNDRY_REDIS_URL: ${FOUNDRY_REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - foundry_data:/app/.data
+    networks:
+      - foundry_backend
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5).read()\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-foundry}
+      POSTGRES_USER: ${POSTGRES_USER:-foundry}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-foundry}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - foundry_backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - foundry_backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+networks:
+  foundry_backend:
+    driver: bridge
 
 volumes:
   foundry_data:
+  postgres_data:
+  redis_data:
