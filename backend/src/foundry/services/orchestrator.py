@@ -19,7 +19,7 @@ from foundry.core.config import Settings
 from foundry.core.errors import ConfigurationError, ValidationError
 from foundry.models import Pipeline
 from foundry.schemas import Citation, TraceEvent
-from foundry.services.knowledge import KnowledgeIndex
+from foundry.services.knowledge import KnowledgeIndex, SearchResult
 from foundry.services.local_model import LocalFakeChatModel
 from foundry.services.providers import ProviderService
 from foundry.services.tables import TableStore
@@ -199,12 +199,16 @@ class Orchestrator:
 
     async def _prepare_rag(self, pipeline: Pipeline, question: str) -> PreparedContext:
         started = time.perf_counter()
-        hits = await asyncio.to_thread(self.knowledge.search, question, pipeline.top_k)
-        filtered = [
-            (document, score) for document, score in hits if score >= pipeline.similarity_threshold
-        ]
-        citations = [self._citation(document, score) for document, score in filtered]
-        context = self._documents_context(document for document, _ in filtered)
+        candidate_k = max(pipeline.top_k * 4, pipeline.top_k)
+        hits = await asyncio.to_thread(
+            self.knowledge.search,
+            question,
+            pipeline.top_k,
+            candidate_k=candidate_k,
+        )
+        filtered = [hit for hit in hits if hit.score >= pipeline.similarity_threshold]
+        citations = [self._citation(hit.document, hit.score) for hit in filtered]
+        context = self._documents_context(hit.document for hit in filtered)
         return PreparedContext(
             context=context or "No relevant context was found.",
             citations=citations,
@@ -213,8 +217,25 @@ class Orchestrator:
                     step="retriever",
                     status="completed",
                     duration_ms=self._duration_ms(started),
-                    metadata={"documents": len(filtered), "top_k": pipeline.top_k},
-                )
+                    metadata={
+                        "mode": "hybrid",
+                        "documents": len(filtered),
+                        "top_k": pipeline.top_k,
+                        "candidate_k": candidate_k,
+                        "dense": True,
+                        "sparse": "bm25",
+                        "fusion": "reciprocal_rank_fusion",
+                    },
+                ),
+                TraceEvent(
+                    step="reranker",
+                    status="completed",
+                    duration_ms=0,
+                    metadata={
+                        "method": "local_lexical_cross_score",
+                        "scores": [self._result_scores(hit) for hit in filtered],
+                    },
+                ),
             ],
         )
 
@@ -232,9 +253,24 @@ class Orchestrator:
         if not sources:
             raise ConfigurationError("TAG requires at least one CSV or XLSX source")
 
+        table_hits = await asyncio.to_thread(
+            self.knowledge.search,
+            question,
+            max(pipeline.top_k, len(sources)),
+            candidate_k=max(pipeline.top_k * 4, len(sources)),
+            kind="table",
+        )
+        ranked_source_ids = [str(hit.document.metadata.get("source_id")) for hit in table_hits]
+        source_by_id = {source.id: source for source in sources}
+        ranked_sources = [
+            source_by_id[source_id]
+            for source_id in ranked_source_ids
+            if source_id in source_by_id
+        ]
+        ranked_sources.extend(source for source in sources if source.id not in ranked_source_ids)
         catalog_parts = [
             await asyncio.to_thread(self.tables.catalog_text, source.table_name)
-            for source in sources
+            for source in ranked_sources[: max(1, pipeline.top_k)]
             if source.table_name
         ]
         catalog = "\n\n".join(catalog_parts)
@@ -282,7 +318,11 @@ class Orchestrator:
                     step="safe_sql_tool",
                     status="completed",
                     duration_ms=duration,
-                    metadata={"sql": sql, "row_count": len(query_result["rows"])},
+                    metadata={
+                        "sql": sql,
+                        "row_count": len(query_result["rows"]),
+                        "table_selection": "hybrid_catalog_retrieval",
+                    },
                 )
             ],
         )
@@ -361,10 +401,25 @@ class Orchestrator:
 
     @staticmethod
     def _documents_context(documents: Any) -> str:
-        return "\n\n".join(
+        return "\n\n".join(Orchestrator._document_context(document) for document in documents)
+
+    @staticmethod
+    def _document_context(document: Document) -> str:
+        original_text = document.metadata.get("original_text") or document.page_content
+        before = document.metadata.get("late_context_before")
+        after = document.metadata.get("late_context_after")
+        late_context = "\n".join(
+            part
+            for part in [
+                f"Previous context: {before}" if before else "",
+                f"Chunk text: {original_text}",
+                f"Next context: {after}" if after else "",
+            ]
+            if part
+        )
+        return (
             f"Source: {document.metadata.get('source_name')} "
-            f"({document.metadata.get('location')})\n{document.page_content}"
-            for document in documents
+            f"({document.metadata.get('location')})\n{late_context}"
         )
 
     @staticmethod
@@ -375,6 +430,18 @@ class Orchestrator:
             location=str(document.metadata.get("location", "")) or None,
             score=round(float(score), 4),
         )
+
+    @staticmethod
+    def _result_scores(hit: SearchResult) -> dict[str, float | str | None]:
+        return {
+            "source": str(hit.document.metadata.get("source_name")),
+            "location": str(hit.document.metadata.get("location")),
+            "score": round(hit.score, 4),
+            "dense": round(hit.dense_score, 4),
+            "sparse": round(hit.sparse_score, 4),
+            "fusion": round(hit.fusion_score, 4),
+            "rerank": round(hit.rerank_score, 4),
+        }
 
     @staticmethod
     def _extract_sql(value: str) -> str:

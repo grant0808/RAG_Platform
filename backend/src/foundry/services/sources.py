@@ -119,9 +119,23 @@ class SourceService:
             raise ValidationError("No text could be extracted from the file")
         base = self._document(source, content, "document")
         documents = self.splitter.split_documents([base])
+        originals = [document.page_content for document in documents]
+        document_context = self._contextual_summary(source, content)
         for index, document in enumerate(documents):
+            original_text = originals[index]
+            before = originals[index - 1] if index > 0 else ""
+            after = originals[index + 1] if index + 1 < len(originals) else ""
             document.metadata["chunk_index"] = index
             document.metadata["location"] = f"chunk:{index}"
+            document.metadata["original_text"] = original_text
+            document.metadata["late_context_before"] = self._snippet(before)
+            document.metadata["late_context_after"] = self._snippet(after)
+            document.metadata["contextual_summary"] = document_context
+            document.page_content = (
+                f"Document: {source.name}\n"
+                f"Context: {document_context}\n"
+                f"Chunk {index + 1} of {len(documents)}:\n{original_text}"
+            )
         return documents
 
     @staticmethod
@@ -131,9 +145,20 @@ class SourceService:
             metadata={
                 "source_id": source.id,
                 "source_name": source.name,
+                "source_kind": source.kind,
                 "location": location,
             },
         )
+
+    @staticmethod
+    def _contextual_summary(source: Source, content: str) -> str:
+        compact = " ".join(content.split())
+        return f"{source.kind} source named {source.name}. Leading context: {compact[:500]}"
+
+    @staticmethod
+    def _snippet(text: str, limit: int = 600) -> str:
+        compact = " ".join(text.split())
+        return compact[:limit]
 
     @staticmethod
     def _kind_for(suffix: str) -> str:
