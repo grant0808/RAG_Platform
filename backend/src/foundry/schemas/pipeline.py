@@ -5,12 +5,14 @@ from pydantic import BaseModel, Field
 
 from foundry.schemas.base import OrmModel, ProviderName, StrategyName
 
+DEFAULT_OPENAI_CHAT_MODEL = "gpt-4o-mini"
+
 
 class PipelineCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     strategy: StrategyName = "rag"
     provider: ProviderName = "openai"
-    model: str = Field(default="gpt-5.4-mini", min_length=1, max_length=120)
+    model: str = Field(default=DEFAULT_OPENAI_CHAT_MODEL, min_length=1, max_length=120)
     system_prompt: str = Field(
         default="Answer only from the supplied context and cite the source metadata.",
         min_length=1,

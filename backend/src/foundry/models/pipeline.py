@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from foundry.core.database import Base
 from foundry.models.base import new_id, utcnow
+
+if TYPE_CHECKING:
+    from foundry.models.chat import ChatSession
+    from foundry.models.deployment import Deployment
 
 
 class Pipeline(Base):
@@ -15,7 +21,7 @@ class Pipeline(Base):
     name: Mapped[str] = mapped_column(String(120))
     strategy: Mapped[str] = mapped_column(String(12), default="rag")
     provider: Mapped[str] = mapped_column(String(24), default="openai")
-    model: Mapped[str] = mapped_column(String(120), default="gpt-5.4-mini")
+    model: Mapped[str] = mapped_column(String(120), default="gpt-4o-mini")
     system_prompt: Mapped[str] = mapped_column(
         Text,
         default="Answer only from the supplied context and cite the source metadata.",
@@ -28,7 +34,13 @@ class Pipeline(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-    versions: Mapped[list["PipelineVersion"]] = relationship(
+    versions: Mapped[list[PipelineVersion]] = relationship(
+        back_populates="pipeline", cascade="all, delete-orphan"
+    )
+    deployments: Mapped[list[Deployment]] = relationship(
+        back_populates="pipeline", cascade="all, delete-orphan"
+    )
+    chat_sessions: Mapped[list[ChatSession]] = relationship(
         back_populates="pipeline", cascade="all, delete-orphan"
     )
 

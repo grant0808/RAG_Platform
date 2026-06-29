@@ -35,13 +35,23 @@
 | Pipeline | GET | `/pipelines` | 200 | Pipeline 목록 |
 | Pipeline | GET | `/pipelines/{pipeline_id}` | 200 | Pipeline 상세 |
 | Pipeline | PATCH | `/pipelines/{pipeline_id}` | 200 | Draft 설정 수정 |
+| Pipeline | DELETE | `/pipelines/{pipeline_id}` | 204 | Pipeline과 관련 버전·배포 삭제 |
 | Pipeline | POST | `/pipelines/{pipeline_id}/versions` | 201 | 새 불변 버전 저장 |
 | Pipeline | GET | `/pipelines/{pipeline_id}/versions` | 200 | 버전 목록 |
 | Pipeline | POST | `/pipelines/{pipeline_id}/rollback/{version_number}` | 200 | 설정 롤백 및 새 버전 생성 |
+| Chat Session | POST | `/chat/sessions` | 201 | 대화 session 생성 |
+| Chat Session | GET | `/chat/sessions` | 200 | 대화 session 목록 |
+| Chat Session | GET | `/chat/sessions/{session_id}/messages` | 200 | session 메시지 목록 |
+| Chat Session | PATCH | `/chat/sessions/{session_id}` | 200 | session 이름 변경 |
+| Chat Session | DELETE | `/chat/sessions/{session_id}` | 204 | 대화 session 삭제 |
 | Chat | POST | `/chat` | 200 | Pipeline 채팅 실행 |
 | Chat | POST | `/chat/stream` | 200 | SSE 채팅 실행 |
 | Deployment | POST | `/deployments` | 201 | 현재 Pipeline 버전 배포 |
 | Deployment | GET | `/deployments` | 200 | 배포 목록 |
+| Deployment | PATCH | `/deployments/{deployment_id}` | 200 | 배포 환경 또는 실행 상태 변경 |
+| Deployment | POST | `/deployments/{deployment_id}/run` | 200 | 배포 실행 |
+| Deployment | POST | `/deployments/{deployment_id}/stop` | 200 | 배포 중지 |
+| Deployment | DELETE | `/deployments/{deployment_id}` | 204 | 배포 삭제 |
 | Public | POST | `/public/{slug}/chat` | 200 | 배포 버전으로 공개 채팅 |
 | CAG | GET | `/cag/cache` | 200 | 유효한 캐시 목록 |
 | CAG | POST | `/cag/cache` | 201 | 캐시 항목 수동 등록 |
@@ -165,7 +175,8 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 {
   "pipeline_id": "59c1...",
   "message": "환불 정책을 요약해줘.",
-  "strategy": "rag"
+  "strategy": "rag",
+  "session_id": "c9b2..."
 }
 ```
 
@@ -174,11 +185,15 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 | `pipeline_id` | string | O | 실행할 Pipeline ID |
 | `message` | string | O | 1~20,000자 |
 | `strategy` | enum \| null | X | 미지정 시 Pipeline 전략; `rag`, `tag`, `cag` |
+| `session_id` | string \| null | X | 기존 대화 session ID; 미지정 시 새 session 자동 생성 |
+
+`message`가 정확히 `/status`이면 모델을 호출하지 않고 해당 session의 token 사용량 상태를 반환한다. `FOUNDRY_OPENAI_ADMIN_API_KEY`, `FOUNDRY_ANTHROPIC_ADMIN_API_KEY`가 설정되어 있으면 Provider Admin API의 실제 사용량·비용도 함께 조회한다.
 
 ### ChatResponse
 
 ```json
 {
+  "session_id": "c9b2...",
   "answer": "환불은 구매일로부터 7일 이내 가능합니다.",
   "strategy": "rag",
   "provider": "openai",
@@ -206,13 +221,100 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 
 `citation.score`와 `location`, `trace.duration_ms`는 `null`일 수 있다. `usage` 키는 Provider SDK가 반환한 사용량 구조에 따라 달라질 수 있다.
 
+`/status` command 응답은 `strategy: "status"`, `provider: "system"`, `model: "local-command"`를 반환하며 `token_status`와 `provider_quota` 객체를 추가로 포함한다.
+
+```json
+{
+  "session_id": "c9b2...",
+  "answer": "Session token status\n- Budget: 100,000 tokens\n- Used total: 368 tokens ...",
+  "strategy": "status",
+  "provider": "system",
+  "model": "local-command",
+  "citations": [],
+  "trace": [],
+  "usage": {},
+  "cached": false,
+  "token_status": {
+    "budget": 100000,
+    "used_total": 368,
+    "used_input": 320,
+    "used_output": 48,
+    "remaining": 99632,
+    "message_count": 1
+  },
+  "provider_quota": {
+    "period": {
+      "start": "2026-06-01T00:00:00Z",
+      "end": "2026-06-25T00:00:00Z",
+      "bucket_width": "1d"
+    },
+    "openai": {
+      "configured": true,
+      "usage": {"available": true, "total_tokens": 1234, "tokens": {}, "requests": {}},
+      "cost": {"available": true, "amount": 0.42, "currency": "USD"},
+      "remaining": {
+        "available": false,
+        "reason": "OpenAI usage/cost endpoints return actual usage and cost, not a universal remaining quota value."
+      }
+    },
+    "anthropic": {
+      "configured": true,
+      "usage": {"available": true, "total_tokens": 500, "tokens": {}, "requests": {}},
+      "cost": {"available": true, "amount": 0.2, "currency": "USD"},
+      "remaining": {"available": true, "remaining_usd": 99.8}
+    }
+  }
+}
+```
+
+Provider Admin API key가 없으면 해당 provider는 `configured: false`와 설정 안내 reason을 반환한다. Admin key가 거부되거나 권한이 부족하면 `available: false`, `status_code`, `error`를 반환한다. OpenAI는 조직 usage/cost 조회를 지원하지만 범용 remaining quota 값은 제공하지 않는다. Anthropic remaining은 Claude Enterprise Spend Limits API 권한이 있을 때만 계산된다.
+
+### ChatSessionCreate / ChatSessionResponse
+
+```json
+{
+  "pipeline_id": "59c1...",
+  "title": "환불 정책 문의"
+}
+```
+
+| 요청 필드 | 타입 | 필수 | 규칙 |
+|---|---|---:|---|
+| `pipeline_id` | string | O | session을 연결할 Pipeline ID |
+| `title` | string \| null | X | 1~160자; 미지정 시 첫 user 메시지에서 자동 생성 |
+
+응답은 `id`, `pipeline_id`, `title`, `created_at`, `updated_at`을 반환한다.
+
+### ChatSessionUpdate
+
+```json
+{
+  "title": "운영 FAQ 테스트"
+}
+```
+
+| 요청 필드 | 타입 | 필수 | 규칙 |
+|---|---|---:|---|
+| `title` | string | O | 1~160자; 앞뒤 공백과 중복 공백은 정리되어 저장 |
+
+### ChatMessageResponse
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `id` | string | 메시지 ID |
+| `session_id` | string | 소속 session ID |
+| `role` | enum | `user`, `assistant` |
+| `content` | string | 메시지 본문 |
+| `message_metadata` | object | assistant 응답의 strategy, citations, trace, usage 등 |
+| `created_at` | datetime | 저장 시각 |
+
 ### DeploymentCreate / DeploymentResponse
 
 ```json
 {
   "pipeline_id": "59c1...",
   "slug": "support-bot",
-  "status": "preview"
+  "environment": "preview"
 }
 ```
 
@@ -220,9 +322,16 @@ Pydantic/FastAPI 요청 검증 실패는 애플리케이션 오류와 달리 Fas
 |---|---|---:|---|
 | `pipeline_id` | string | O | 배포할 Pipeline ID |
 | `slug` | string \| null | X | 3~80자, 영문·숫자·하이픈; 미지정 시 자동 생성 |
-| `status` | enum | X | 기본 `preview`; `preview`, `production` |
+| `environment` | enum | X | 기본 `preview`; `preview`, `production` |
 
-응답은 `id`, `pipeline_id`, `slug`, `version`, `status`, `created_at`을 반환한다. `version`은 생성 시점의 Pipeline head 버전이다.
+응답은 `id`, `pipeline_id`, `slug`, `version`, `environment`, `status`, `created_at`을 반환한다. `version`은 생성 시점의 Pipeline head 버전이다. `status`는 실행 상태이며 `running`, `stopped` 중 하나다.
+
+### DeploymentUpdate
+
+| 요청 필드 | 타입 | 필수 | 규칙 |
+|---|---|---:|---|
+| `environment` | enum | X | `preview`, `production` |
+| `status` | enum | X | `running`, `stopped` |
 
 ### CacheCreateRequest / CacheEntryResponse
 
@@ -327,6 +436,10 @@ curl -X POST http://localhost:8000/api/v1/sources/upload \
 
 전송한 필드만 Draft에 반영한다. 자동으로 버전을 만들지 않으며 Provider·모델 조합은 다시 검증한다.
 
+#### `DELETE /pipelines/{pipeline_id}`
+
+Pipeline을 삭제하고 본문 없이 204를 반환한다. PoC 정책상 관련 `pipeline_versions`, `deployments`, `chat_sessions`, `chat_messages`도 함께 삭제한다. 따라서 해당 Pipeline으로 만든 공개 채팅 slug는 즉시 404가 된다. 존재하지 않는 Pipeline은 404 `not_found`를 반환한다.
+
 #### `POST /pipelines/{pipeline_id}/versions`
 
 현재 Draft를 새 불변 스냅샷으로 저장하고 `current_version`을 1 증가시킨다.
@@ -341,6 +454,26 @@ curl -X POST http://localhost:8000/api/v1/sources/upload \
 
 ### 5.5 Chat
 
+#### `POST /chat/sessions`
+
+Pipeline에 연결된 빈 대화 session을 생성한다. 명시적으로 생성하지 않아도 `/chat` 또는 `/chat/stream` 호출 시 `session_id`가 없으면 자동 생성된다.
+
+#### `GET /chat/sessions`
+
+대화 session 목록을 `updated_at` 내림차순으로 반환한다. `?pipeline_id={id}`를 주면 특정 Pipeline의 session만 반환한다.
+
+#### `GET /chat/sessions/{session_id}/messages`
+
+대화 session에 저장된 user/assistant 메시지를 생성 순서대로 반환한다.
+
+#### `PATCH /chat/sessions/{session_id}`
+
+대화 session 이름을 변경한다. 변경된 이름은 session 목록과 Playground session 선택 UI에 반영된다.
+
+#### `DELETE /chat/sessions/{session_id}`
+
+대화 session과 그 메시지를 삭제하고 본문 없이 204를 반환한다.
+
 #### `POST /chat`
 
 현재 Pipeline Draft 설정으로 RAG, TAG 또는 CAG를 동기 실행한다.
@@ -348,12 +481,15 @@ curl -X POST http://localhost:8000/api/v1/sources/upload \
 - RAG: 인메모리 벡터 검색 후 출처와 함께 답변한다.
 - TAG: 업로드된 표를 대상으로 읽기 전용 DuckDB `SELECT`를 생성·검증·실행한다.
 - CAG: `pipeline_id:version:normalized_question` 키로 캐시를 조회하고 miss 시 RAG로 fallback한다.
+- `session_id`가 있으면 이전 user/assistant 메시지를 모델 입력에 포함하고, 없으면 새 session을 만든다.
+- user 메시지와 assistant 응답은 `chat_messages`에 저장된다.
+- `/status`는 저장된 assistant 메시지의 `usage.total_tokens`를 합산해 session 내부 예산 대비 사용량과 잔여량을 반환한다. 예산은 `FOUNDRY_CHAT_SESSION_TOKEN_BUDGET` 설정값이다. Admin API key가 설정되어 있으면 OpenAI/Anthropic의 실제 월간 usage/cost도 조회한다. Provider가 remaining quota를 API로 노출하지 않거나 권한이 부족하면 해당 필드는 unavailable로 표시한다.
 
 TAG에 표 Source가 없으면 409를 반환한다. Provider가 연결되지 않았거나 모델 호출에 실패해도 요청은 실패한다.
 
 #### `POST /chat/stream`
 
-요청 모델은 `/chat`과 동일하고 응답 Content-Type은 `text/event-stream`이다.
+요청 모델은 `/chat`과 동일하고 응답 Content-Type은 `text/event-stream`이다. `done` 이벤트의 payload는 `ChatResponse`와 동일하며 `session_id`를 포함한다.
 
 | event | data | 발생 조건 |
 |---|---|---|
@@ -379,15 +515,31 @@ data: {"answer":"환불은 ...","strategy":"rag","provider":"openai","model":"gp
 
 #### `POST /deployments`
 
-Pipeline의 현재 버전을 Preview 또는 Production 배포로 고정한다. 이후 Draft가 변경되어도 배포는 생성 당시 버전 스냅샷을 사용한다.
+Pipeline의 현재 버전을 Preview 또는 Production 배포로 고정하고 기본 실행 상태를 `running`으로 만든다. 이후 Draft가 변경되어도 배포는 생성 당시 버전 스냅샷을 사용한다.
 
 #### `GET /deployments`
 
 생성 시각 내림차순으로 모든 배포를 반환한다.
 
+#### `PATCH /deployments/{deployment_id}`
+
+배포의 `environment` 또는 `status`를 부분 변경한다. Preview/Production 전환은 배포가 가리키는 Pipeline 버전을 바꾸지 않는다.
+
+#### `POST /deployments/{deployment_id}/run`
+
+배포 상태를 `running`으로 변경한다.
+
+#### `POST /deployments/{deployment_id}/stop`
+
+배포 상태를 `stopped`로 변경한다. 중지된 배포의 public chat은 409 `configuration_error`를 반환한다.
+
+#### `DELETE /deployments/{deployment_id}`
+
+배포를 삭제하고 본문 없이 204를 반환한다. 삭제된 slug의 public chat은 404 `not_found`를 반환한다.
+
 #### `POST /public/{slug}/chat`
 
-배포가 가리키는 불변 Pipeline 버전으로 채팅한다. 요청 본문은 `pipeline_id`가 없는 `PublicChatRequest`다.
+실행 중인 배포가 가리키는 불변 Pipeline 버전으로 채팅한다. 요청 본문은 `pipeline_id`가 없는 `PublicChatRequest`다.
 
 ```json
 {

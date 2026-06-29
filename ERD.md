@@ -11,6 +11,8 @@ erDiagram
 
     PIPELINES ||--o{ PIPELINE_VERSIONS : has
     PIPELINES ||--o{ DEPLOYMENTS : publishes
+    PIPELINES ||--o{ CHAT_SESSIONS : owns
+    CHAT_SESSIONS ||--o{ CHAT_MESSAGES : contains
 
     PROVIDER_CONNECTIONS {
         string id PK
@@ -63,7 +65,25 @@ erDiagram
         string pipeline_id FK
         string slug UK
         int version "Logical pipeline version reference"
-        string status
+        string environment "preview | production"
+        string status "running | stopped"
+        datetime created_at
+    }
+
+    CHAT_SESSIONS {
+        string id PK
+        string pipeline_id FK
+        string title
+        datetime created_at
+        datetime updated_at
+    }
+
+    CHAT_MESSAGES {
+        string id PK
+        string session_id FK
+        string role "user | assistant"
+        text content
+        json message_metadata
         datetime created_at
     }
 ```
@@ -74,11 +94,15 @@ erDiagram
 |---|---|---|---|---|
 | `pipelines` | `pipeline_versions` | 1:N | Pipeline 삭제 시 cascade | `(pipeline_id, version)` unique |
 | `pipelines` | `deployments` | 1:N | Pipeline 삭제 시 cascade | `slug` unique |
+| `pipelines` | `chat_sessions` | 1:N | Pipeline 삭제 시 cascade | - |
+| `chat_sessions` | `chat_messages` | 1:N | Session 삭제 시 cascade | - |
 
 ## 구현상 주의점
 
 - `pipelines.provider`는 `provider_connections.provider`를 논리적으로 참조하지만 물리 FK는 아니다. 서비스 계층에서 Provider와 모델 사용 가능 여부를 검증한다.
 - `deployments.version`은 해당 Pipeline의 `pipeline_versions.version`을 논리적으로 참조한다. 현재 복합 FK는 없으며 조회 시 `(pipeline_id, version)`으로 버전 스냅샷을 찾는다.
+- `deployments.environment`는 Preview/Production 노출 환경이고, `deployments.status`는 실행 상태다. `stopped` 상태의 public chat은 실행되지 않는다.
+- `chat_sessions`는 Pipeline별 대화 thread다. `chat_messages`는 session 내 user/assistant 메시지를 생성 순서대로 저장하며, assistant 메시지의 trace·citation·usage는 `message_metadata`에 저장한다.
 - `sources`는 현재 모든 Pipeline이 공유하는 전역 지식 소스다. Pipeline별 소스 선택 관계 테이블은 아직 없다.
 - 문서·벡터 인덱스, TAG용 동적 테이블, CAG 캐시는 각각 파일 시스템·FAISS·SQLite 동적 테이블·프로세스 메모리에 저장되어 이 메타데이터 ERD에 포함되지 않는다.
 - PoC 요구에 따라 사용자, 테넌트, 역할, 세션 등 인증 관련 엔티티는 포함하지 않았다.

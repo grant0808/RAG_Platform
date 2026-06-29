@@ -3,15 +3,39 @@ from fastapi.testclient import TestClient
 from foundry.cli import bootstrap_local, initialize_database
 from foundry.core.config import Settings
 from foundry.main import create_app
+from foundry.services.knowledge import KnowledgeIndex
 
 
 def local_settings(tmp_path) -> Settings:
     return Settings(
         data_dir=tmp_path / "data",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'local.db'}",
+        vector_store_provider="memory",
+        embedding_provider="local",
+        openai_api_key=None,
+        openai_embedding_api_key=None,
+        openai_admin_api_key=None,
         master_key_path=tmp_path / "master.key",
         fake_llm_enabled=True,
     )
+
+
+def test_local_bootstrap_settings_avoid_external_embedding_and_vector_services(tmp_path):
+    settings = local_settings(tmp_path)
+
+    assert settings.embedding_provider == "local"
+    assert settings.vector_store_provider == "memory"
+
+
+def test_empty_embedding_key_falls_back_to_admin_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings = Settings(
+        embedding_provider="openai",
+        openai_embedding_api_key="",
+        openai_admin_api_key="admin-test-key",
+    )
+
+    assert KnowledgeIndex(settings)._configured_openai_api_key() == "admin-test-key"
 
 
 async def test_initialize_database_creates_sqlite_schema(tmp_path):
@@ -38,9 +62,9 @@ async def test_bootstrap_is_idempotent_and_supports_local_chat(tmp_path):
 
         response = client.post(
             "/api/v1/public/local-rag-preview/chat",
-            json={"message": "Foundry의 응답 속도 목표는?"},
+            json={"message": "What is Foundry's answer latency goal?"},
         )
 
     assert response.status_code == 200
     assert response.json()["model"] == "gpt-local-demo"
-    assert "로컬 테스트 모델" in response.json()["answer"]
+    assert "로컬 deterministic 테스트 모델" in response.json()["answer"]
