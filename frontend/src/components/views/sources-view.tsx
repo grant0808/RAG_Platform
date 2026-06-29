@@ -17,19 +17,48 @@ export function SourcesView({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ completed: number; total: number } | null>(
+    null,
+  );
   const totalSize = snapshot.sources.reduce((total, source) => total + source.size_bytes, 0);
   const tables = snapshot.sources.filter((source) => source.kind === "table").length;
 
-  async function upload(file: File) {
+  async function upload(files: File[]) {
+    if (!files.length) return;
     setUploading(true);
+    setUploadProgress({ completed: 0, total: files.length });
+    const uploaded: string[] = [];
+    const failed: string[] = [];
     try {
-      const source = await api.uploadSource(file);
-      notify(`${source.name} 인덱싱을 완료했습니다.`);
+      for (const file of files) {
+        try {
+          const source = await api.uploadSource(file);
+          uploaded.push(source.name);
+        } catch (caught) {
+          const message =
+            caught instanceof Error ? caught.message : "Upload failed. 파일을 다시 확인해 주세요.";
+          failed.push(`${file.name}: ${message}`);
+        } finally {
+          setUploadProgress((current) =>
+            current ? { ...current, completed: current.completed + 1 } : current,
+          );
+        }
+      }
+      if (uploaded.length && failed.length === 0) {
+        notify(
+          uploaded.length === 1
+            ? `${uploaded[0]} 인덱싱을 완료했습니다.`
+            : `${uploaded.length}개 파일 인덱싱을 완료했습니다.`,
+        );
+      } else if (uploaded.length) {
+        notify(`${uploaded.length}개 파일 인덱싱 완료, ${failed.length}개 실패: ${failed[0]}`);
+      } else {
+        notify(`${failed.length}개 파일 업로드에 실패했습니다: ${failed[0]}`);
+      }
       await refresh();
-    } catch (caught) {
-      notify(caught instanceof Error ? caught.message : "Upload failed. 파일을 다시 확인해 주세요.");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -58,15 +87,18 @@ export function SourcesView({
               ref={inputRef}
               className="visually-hidden"
               type="file"
+              multiple
               accept=".txt,.md,.json,.html,.pdf,.csv,.xlsx,.xlsm"
-              onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])}
+              onChange={(event) => void upload(Array.from(event.target.files ?? []))}
             />
             <button
               className="button primary"
               disabled={uploading}
               onClick={() => inputRef.current?.click()}
             >
-              {uploading ? "Indexing..." : "+ Upload source"}
+              {uploadProgress
+                ? `Indexing ${uploadProgress.completed}/${uploadProgress.total}`
+                : "+ Upload source"}
             </button>
           </>
         }
@@ -90,8 +122,7 @@ export function SourcesView({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
-          const file = event.dataTransfer.files[0];
-          if (file) void upload(file);
+          void upload(Array.from(event.dataTransfer.files));
         }}
       >
         <span>DATA PLANE / DROP KNOWLEDGE</span>

@@ -130,30 +130,38 @@ async def _sse_events(
     chat_session_id: str,
     history: list[tuple[str, str]],
 ) -> AsyncIterator[str]:
-    async for event in container.orchestrator.stream(
-        session,
-        pipeline,
-        message,
-        strategy or pipeline.strategy,
-        history=history,
-    ):
-        if event["type"] == "done":
-            event["data"]["session_id"] = chat_session_id
-            await container.conversations.add_message(
-                session,
-                session_id=chat_session_id,
-                role="assistant",
-                content=str(event["data"]["answer"]),
-                metadata={
-                    "strategy": event["data"]["strategy"],
-                    "cached": event["data"]["cached"],
-                    "citations": event["data"]["citations"],
-                    "trace": event["data"]["trace"],
-                    "usage": event["data"]["usage"],
-                },
-            )
-        data = json.dumps(event["data"], ensure_ascii=False, default=str)
-        yield f"event: {event['type']}\ndata: {data}\n\n"
+    try:
+        async for event in container.orchestrator.stream(
+            session,
+            pipeline,
+            message,
+            strategy or pipeline.strategy,
+            history=history,
+        ):
+            if event["type"] == "done":
+                event["data"]["session_id"] = chat_session_id
+                await container.conversations.add_message(
+                    session,
+                    session_id=chat_session_id,
+                    role="assistant",
+                    content=str(event["data"]["answer"]),
+                    metadata={
+                        "strategy": event["data"]["strategy"],
+                        "cached": event["data"]["cached"],
+                        "citations": event["data"]["citations"],
+                        "trace": event["data"]["trace"],
+                        "usage": event["data"]["usage"],
+                    },
+                )
+            data = json.dumps(event["data"], ensure_ascii=False, default=str)
+            yield f"event: {event['type']}\ndata: {data}\n\n"
+    except Exception as exc:
+        data = json.dumps(
+            {"message": f"Runtime execution failed: {exc}"},
+            ensure_ascii=False,
+            default=str,
+        )
+        yield f"event: error\ndata: {data}\n\n"
 
 
 async def _status_sse_events(

@@ -86,18 +86,32 @@ class Orchestrator:
                 cached=True,
             )
 
+        messages = self._messages(pipeline, question, prepared.context, history or [])
         model = await self._model(session, pipeline)
         started = time.perf_counter()
-        response: AIMessage = await model.ainvoke(
-            self._messages(pipeline, question, prepared.context, history or [])
-        )
+        try:
+            response: AIMessage = await model.ainvoke(messages)
+            fallback_reason = None
+        except Exception as exc:
+            if not self._should_fallback_to_local_model(exc):
+                raise
+            response = await LocalFakeChatModel().ainvoke(messages)
+            fallback_reason = self._provider_error_summary(exc)
         duration = self._duration_ms(started)
+        metadata: dict[str, Any] = {"provider": pipeline.provider, "model": pipeline.model}
+        if fallback_reason:
+            metadata.update(
+                {
+                    "fallback": "local_model",
+                    "fallback_reason": fallback_reason,
+                }
+            )
         prepared.trace.append(
             TraceEvent(
                 step="chat_model",
                 status="completed",
                 duration_ms=duration,
-                metadata={"provider": pipeline.provider, "model": pipeline.model},
+                metadata=metadata,
             )
         )
         answer = self._message_text(response)
@@ -139,25 +153,47 @@ class Orchestrator:
             }
             return
 
+        messages = self._messages(pipeline, question, prepared.context, history or [])
         model = await self._model(session, pipeline)
         answer_parts: list[str] = []
         usage: dict[str, int] = {}
         started = time.perf_counter()
-        async for chunk in model.astream(
-            self._messages(pipeline, question, prepared.context, history or [])
-        ):
-            text = self._message_text(chunk)
-            if text:
-                answer_parts.append(text)
-                yield {"type": "token", "data": {"text": text}}
-            if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
-                usage = chunk.usage_metadata
+        fallback_reason = None
+        try:
+            async for chunk in model.astream(messages):
+                text = self._message_text(chunk)
+                if text:
+                    answer_parts.append(text)
+                    yield {"type": "token", "data": {"text": text}}
+                if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
+                    usage = chunk.usage_metadata
+        except Exception as exc:
+            if not self._should_fallback_to_local_model(exc):
+                raise
+            fallback_reason = self._provider_error_summary(exc)
+            answer_parts = []
+            usage = {}
+            async for chunk in LocalFakeChatModel().astream(messages):
+                text = self._message_text(chunk)
+                if text:
+                    answer_parts.append(text)
+                    yield {"type": "token", "data": {"text": text}}
+                if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
+                    usage = chunk.usage_metadata
+        metadata: dict[str, Any] = {"provider": pipeline.provider, "model": pipeline.model}
+        if fallback_reason:
+            metadata.update(
+                {
+                    "fallback": "local_model",
+                    "fallback_reason": fallback_reason,
+                }
+            )
         prepared.trace.append(
             TraceEvent(
                 step="chat_model",
                 status="completed",
                 duration_ms=self._duration_ms(started),
-                metadata={"provider": pipeline.provider, "model": pipeline.model},
+                metadata=metadata,
             )
         )
         answer = "".join(answer_parts)
@@ -366,6 +402,29 @@ class Orchestrator:
         if pipeline.provider == "anthropic":
             return ChatAnthropic(model=pipeline.model, api_key=api_key, streaming=True)
         raise ConfigurationError(f"Unsupported pipeline provider: {pipeline.provider}")
+
+    def _should_fallback_to_local_model(self, exc: Exception) -> bool:
+        return (
+            self.settings.fallback_to_local_model_on_provider_quota
+            and self._is_provider_quota_error(exc)
+        )
+
+    @staticmethod
+    def _is_provider_quota_error(exc: Exception) -> bool:
+        value = str(exc).lower()
+        code = str(getattr(exc, "code", "")).lower()
+        status_code = getattr(exc, "status_code", None)
+        return (
+            status_code == 429
+            or code in {"insufficient_quota", "rate_limit_exceeded"}
+            or "insufficient_quota" in value
+            or "exceeded your current quota" in value
+        )
+
+    @staticmethod
+    def _provider_error_summary(exc: Exception) -> str:
+        value = " ".join(str(exc).split())
+        return value[:500]
 
     def _execute_sql(self, sql: str, allowed_tables: list[str]) -> dict[str, Any]:
         return self.tables.execute_safe(sql, allowed_tables=set(allowed_tables))

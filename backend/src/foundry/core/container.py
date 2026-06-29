@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from sqlalchemy import text
+
 from foundry.core.config import Settings
 from foundry.core.crypto import CredentialCipher
 from foundry.core.database import Database
@@ -56,6 +58,15 @@ class Container:
     async def startup(self) -> None:
         await self.database.create_schema()
         async for session in self.database.session():
+            if not self.settings.fake_llm_enabled:
+                await session.execute(
+                    text(
+                        "UPDATE pipelines SET model = :model "
+                        "WHERE provider = 'openai' AND model IN "
+                        "('gpt-5.4-mini', 'gpt-local-demo')"
+                    ),
+                    {"model": self.settings.openai_chat_model},
+                )
             await self.sources.rebuild(session)
 
     async def shutdown(self) -> None:

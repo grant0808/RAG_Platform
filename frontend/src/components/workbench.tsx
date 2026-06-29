@@ -20,6 +20,7 @@ const emptySnapshot: AppSnapshot = {
   pipelines: [],
   deployments: [],
 };
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 
 export function Workbench() {
   const [view, setView] = useState<ViewName>("overview");
@@ -74,7 +75,7 @@ export function Workbench() {
     try {
       const provider = form.get("provider") as ProviderName;
       const connection = snapshot.providers.find((item) => item.provider === provider);
-      const model = String(form.get("model") || connection?.models[0] || "gpt-local-demo");
+      const model = String(form.get("model") || connection?.models[0] || DEFAULT_OPENAI_MODEL);
       const created = await api.createPipeline({
         name: String(form.get("name")),
         strategy: form.get("strategy") as Strategy,
@@ -228,7 +229,7 @@ export function Workbench() {
             </div>
             <label className="field">
               <span>Model ID</span>
-              <input name="model" defaultValue={firstProvider?.models[0] ?? "gpt-local-demo"} required />
+              <input name="model" defaultValue={firstProvider?.models[0] ?? DEFAULT_OPENAI_MODEL} required />
             </label>
             <div className="modal-actions">
               <button type="button" className="button" onClick={() => setDialogOpen(false)}>

@@ -21,7 +21,7 @@ class Pipeline(Base):
     name: Mapped[str] = mapped_column(String(120))
     strategy: Mapped[str] = mapped_column(String(12), default="rag")
     provider: Mapped[str] = mapped_column(String(24), default="openai")
-    model: Mapped[str] = mapped_column(String(120), default="gpt-5.4-mini")
+    model: Mapped[str] = mapped_column(String(120), default="gpt-4o-mini")
     system_prompt: Mapped[str] = mapped_column(
         Text,
         default="Answer only from the supplied context and cite the source metadata.",

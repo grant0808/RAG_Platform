@@ -172,6 +172,16 @@ export async function streamChat(
       const rawData = frame.match(/^data:\s*(.+)$/m)?.[1];
       if (!event || !rawData) continue;
       const data: unknown = JSON.parse(rawData);
+      if (event === "error") {
+        const message =
+          typeof data === "object" &&
+          data !== null &&
+          "message" in data &&
+          typeof data.message === "string"
+            ? data.message
+            : "Runtime execution failed.";
+        throw new ApiError(message, response.status);
+      }
       if (event === "token") handlers.onToken((data as { text: string }).text);
       if (event === "trace") handlers.onTrace(data as TraceEvent);
       if (event === "citation") handlers.onCitation(data as Citation);

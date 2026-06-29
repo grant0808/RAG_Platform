@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from io import BytesIO
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from foundry.services.knowledge import KnowledgeIndex
 from foundry.services.tables import TableStore, safe_identifier
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".json", ".html", ".pdf", ".csv", ".xlsx", ".xlsm"}
+PYPDF_LOGGERS = ("pypdf", "pypdf._reader", "pypdf.generic._image_inline")
 
 
 class SourceService:
@@ -189,8 +191,17 @@ class SourceService:
     @staticmethod
     def _extract_text(path: Path, payload: bytes, suffix: str) -> str:
         if suffix == ".pdf":
-            reader = PdfReader(BytesIO(payload))
-            return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+            previous_levels = [
+                (logger := logging.getLogger(name), logger.level) for name in PYPDF_LOGGERS
+            ]
+            try:
+                for logger, _level in previous_levels:
+                    logger.setLevel(logging.CRITICAL + 1)
+                reader = PdfReader(BytesIO(payload))
+                return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+            finally:
+                for logger, level in previous_levels:
+                    logger.setLevel(level)
         text = payload.decode("utf-8", errors="replace")
         if suffix == ".json":
             try:

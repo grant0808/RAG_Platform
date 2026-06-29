@@ -90,6 +90,7 @@ class KnowledgeIndex:
         self.document_frequencies: Counter[str] = Counter()
         self.average_document_length = 0.0
         self._next_document_id = 0
+        self._dense_index_unavailable = False
 
     def reset(self) -> None:
         if isinstance(self.vector_store, PostgresVectorDB):
@@ -101,6 +102,7 @@ class KnowledgeIndex:
         self.document_frequencies = Counter()
         self.average_document_length = 0.0
         self._next_document_id = 0
+        self._dense_index_unavailable = False
 
     def add_documents(self, documents: Iterable[Document]) -> int:
         items = [self._with_document_id(document) for document in documents]
@@ -110,8 +112,9 @@ class KnowledgeIndex:
                 if vector_store is not None:
                     vector_store.add_documents(items)
             except Exception:
-                logger.exception("Dense vector indexing failed; falling back to sparse index")
+                logger.info("Dense vector index unavailable; using sparse index")
                 self.vector_store = None
+                self._dense_index_unavailable = True
             self.documents.extend(items)
             self._rebuild_sparse_index()
         return len(items)
@@ -136,8 +139,9 @@ class KnowledgeIndex:
                 else []
             )
         except Exception:
-            logger.exception("Dense vector search failed; falling back to sparse index")
+            logger.info("Dense vector search unavailable; using sparse index")
             self.vector_store = None
+            self._dense_index_unavailable = True
             dense_hits = []
         dense_by_id = {
             self._document_key(document): self._dense_score(score)
@@ -303,6 +307,8 @@ class KnowledgeIndex:
         return 1 / (1 + max(float(raw_score), 0.0))
 
     def _vector_store(self) -> InMemoryVectorStore | PostgresVectorDB | None:
+        if self._dense_index_unavailable:
+            return None
         if self.vector_store is not None:
             return self.vector_store
         if self._should_use_sparse_only_index():

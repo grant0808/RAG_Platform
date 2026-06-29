@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = 120
     cache_ttl_seconds: int = 300
     fake_llm_enabled: bool = False
+    fallback_to_local_model_on_provider_quota: bool = True
     chat_session_token_budget: int = 100_000
     openai_admin_api_key: SecretStr | None = None
     anthropic_admin_api_key: SecretStr | None = None
