@@ -60,6 +60,10 @@ class TableStore:
             else:
                 raise ValidationError("TAG supports CSV and XLSX files")
 
+    def drop_table(self, table_name: str) -> None:
+        with self.lock:
+            self.connection.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+
     def _import_excel(self, path: Path, quoted_table: str) -> None:
         workbook = load_workbook(path, read_only=True, data_only=True)
         sheet = workbook.active

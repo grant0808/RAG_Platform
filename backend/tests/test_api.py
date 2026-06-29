@@ -102,6 +102,17 @@ def test_source_pipeline_version_and_rag_chat(client, app, monkeypatch):
     assert any(event["step"] == "retriever" for event in body["trace"])
 
 
+def test_invalid_upload_returns_validation_error(client):
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("broken.pdf", b"this is not a valid pdf")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert client.get("/api/v1/sources").json() == []
+
+
 def test_tag_executes_only_validated_select(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)

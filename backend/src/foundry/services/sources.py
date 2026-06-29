@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from foundry.core.config import Settings
-from foundry.core.errors import NotFoundError, ValidationError
+from foundry.core.errors import ConfigurationError, NotFoundError, ValidationError
 from foundry.models import Source
 from foundry.services.knowledge import KnowledgeIndex
 from foundry.services.tables import TableStore, safe_identifier
@@ -56,21 +56,33 @@ class SourceService:
         session.add(source)
         await session.flush()
         path = self.settings.data_dir / "uploads" / f"{source.id}{suffix}"
-        await asyncio.to_thread(path.write_bytes, payload)
-        source.path = str(path)
+        try:
+            await asyncio.to_thread(path.write_bytes, payload)
+            source.path = str(path)
 
-        documents: list[Document]
-        if suffix in {".csv", ".xlsx", ".xlsm"}:
-            source.table_name = f"source_{safe_identifier(source.id)}"
-            await asyncio.to_thread(self.tables.import_file, path, source.table_name)
-            content = await asyncio.to_thread(self.tables.catalog_text, source.table_name)
-            documents = [self._document(source, content, "table_catalog")]
-        else:
-            content = await asyncio.to_thread(self._extract_text, path, payload, suffix)
-            documents = self._split_documents(source, content)
+            documents: list[Document]
+            if suffix in {".csv", ".xlsx", ".xlsm"}:
+                source.table_name = f"source_{safe_identifier(source.id)}"
+                await asyncio.to_thread(self.tables.import_file, path, source.table_name)
+                content = await asyncio.to_thread(self.tables.catalog_text, source.table_name)
+                documents = [self._document(source, content, "table_catalog")]
+            else:
+                content = await asyncio.to_thread(self._extract_text, path, payload, suffix)
+                documents = self._split_documents(source, content)
 
-        source.chunk_count = self.knowledge.add_documents(documents)
-        source.status = "ready"
+            source.chunk_count = self.knowledge.add_documents(documents)
+            source.status = "ready"
+        except ValidationError:
+            await self._cleanup_failed_ingest(path, source.table_name)
+            raise
+        except OSError as exc:
+            await self._cleanup_failed_ingest(path, source.table_name)
+            raise ConfigurationError("Upload storage is unavailable") from exc
+        except Exception as exc:
+            await self._cleanup_failed_ingest(path, source.table_name)
+            raise ValidationError(
+                f"Failed to process uploaded file. Ensure {filename} is a valid {suffix} file."
+            ) from exc
         await session.flush()
         await session.refresh(source)
         return source
@@ -167,6 +179,12 @@ class SourceService:
         if suffix in {".csv", ".xlsx", ".xlsm"}:
             return "table"
         return "document"
+
+    async def _cleanup_failed_ingest(self, path: Path, table_name: str | None) -> None:
+        if table_name:
+            await asyncio.to_thread(self.tables.drop_table, table_name)
+        if await asyncio.to_thread(path.exists):
+            await asyncio.to_thread(path.unlink)
 
     @staticmethod
     def _extract_text(path: Path, payload: bytes, suffix: str) -> str:
