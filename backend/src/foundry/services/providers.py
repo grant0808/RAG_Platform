@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
 
 import httpx
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from foundry.core.config import Settings
 from foundry.core.crypto import CredentialCipher, mask_secret
 from foundry.core.errors import NotFoundError, ProviderError, ValidationError
 from foundry.models import ProviderConnection
@@ -46,9 +48,15 @@ class ProviderClient:
 
 
 class ProviderService:
-    def __init__(self, cipher: CredentialCipher, client: ProviderClient) -> None:
+    def __init__(
+        self,
+        cipher: CredentialCipher,
+        client: ProviderClient,
+        settings: Settings,
+    ) -> None:
         self.cipher = cipher
         self.client = client
+        self.settings = settings
 
     async def connect(
         self,
@@ -84,6 +92,7 @@ class ProviderService:
             connection.models = models
             connection.status = "connected"
             connection.last_validated_at = now
+        self._sync_openai_runtime_keys(provider, api_key)
         await session.flush()
         await session.refresh(connection)
         return connection
@@ -119,4 +128,25 @@ class ProviderService:
 
     async def disconnect(self, session: AsyncSession, provider: str) -> None:
         connection = await self.get(session, provider)
+        api_key = self.cipher.decrypt(connection.encrypted_key)
+        self._clear_openai_runtime_keys(provider, api_key)
         await session.delete(connection)
+
+    def _sync_openai_runtime_keys(self, provider: str, api_key: str) -> None:
+        if provider != "openai":
+            return
+        secret = SecretStr(api_key)
+        self.settings.openai_api_key = secret
+        self.settings.openai_embedding_api_key = secret
+
+    def _clear_openai_runtime_keys(self, provider: str, api_key: str) -> None:
+        if provider != "openai":
+            return
+        if self._secret_matches(self.settings.openai_api_key, api_key):
+            self.settings.openai_api_key = None
+        if self._secret_matches(self.settings.openai_embedding_api_key, api_key):
+            self.settings.openai_embedding_api_key = None
+
+    @staticmethod
+    def _secret_matches(secret: SecretStr | None, value: str) -> bool:
+        return secret is not None and secret.get_secret_value() == value

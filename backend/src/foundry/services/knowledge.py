@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import math
 import os
 import re
@@ -16,6 +17,7 @@ from foundry.core.config import Settings
 from foundry.core.errors import ConfigurationError
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_\uac00-\ud7a3]+", re.UNICODE)
+logger = logging.getLogger("foundry")
 
 
 @dataclass(frozen=True)
@@ -103,9 +105,13 @@ class KnowledgeIndex:
     def add_documents(self, documents: Iterable[Document]) -> int:
         items = [self._with_document_id(document) for document in documents]
         if items:
-            vector_store = self._vector_store()
-            if vector_store is not None:
-                vector_store.add_documents(items)
+            try:
+                vector_store = self._vector_store()
+                if vector_store is not None:
+                    vector_store.add_documents(items)
+            except Exception:
+                logger.exception("Dense vector indexing failed; falling back to sparse index")
+                self.vector_store = None
             self.documents.extend(items)
             self._rebuild_sparse_index()
         return len(items)
@@ -122,12 +128,17 @@ class KnowledgeIndex:
             return []
 
         candidate_count = min(len(self.documents), candidate_k or max(top_k * 4, top_k))
-        vector_store = self._vector_store()
-        dense_hits = (
-            vector_store.similarity_search_with_score(query, k=candidate_count)
-            if vector_store is not None
-            else []
-        )
+        try:
+            vector_store = self._vector_store()
+            dense_hits = (
+                vector_store.similarity_search_with_score(query, k=candidate_count)
+                if vector_store is not None
+                else []
+            )
+        except Exception:
+            logger.exception("Dense vector search failed; falling back to sparse index")
+            self.vector_store = None
+            dense_hits = []
         dense_by_id = {
             self._document_key(document): self._dense_score(score)
             for document, score in dense_hits
@@ -294,16 +305,15 @@ class KnowledgeIndex:
     def _vector_store(self) -> InMemoryVectorStore | PostgresVectorDB | None:
         if self.vector_store is not None:
             return self.vector_store
-        if self._is_fake_chat_without_embedding_key():
+        if self._should_use_sparse_only_index():
             return None
         embeddings = self._build_embeddings()
         self.vector_store = self._build_vector_store(embeddings)
         return self.vector_store
 
-    def _is_fake_chat_without_embedding_key(self) -> bool:
+    def _should_use_sparse_only_index(self) -> bool:
         return (
-            self.settings.fake_llm_enabled
-            and self.settings.embedding_provider == "openai"
+            self.settings.embedding_provider == "openai"
             and self.settings.openai_embedding_api_key is None
             and self.settings.openai_api_key is None
             and self.settings.openai_admin_api_key is None

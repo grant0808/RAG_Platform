@@ -1,4 +1,32 @@
+from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, AIMessageChunk
+
+from foundry.core.config import Settings
+from foundry.main import create_app
+
+PDF_WITH_TEXT = (
+    b"%PDF-1.4\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+    b"/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj\n"
+    b"4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
+    b"5 0 obj<</Length 44>>stream\n"
+    b"BT /F1 24 Tf 72 720 Td (Hello PDF upload) Tj ET\n"
+    b"endstream endobj\n"
+    b"xref\n"
+    b"0 6\n"
+    b"0000000000 65535 f \n"
+    b"0000000009 00000 n \n"
+    b"0000000058 00000 n \n"
+    b"0000000115 00000 n \n"
+    b"0000000241 00000 n \n"
+    b"0000000311 00000 n \n"
+    b"trailer<</Size 6/Root 1 0 R>>\n"
+    b"startxref\n"
+    b"405\n"
+    b"%%EOF\n"
+)
 
 
 class FakeChatModel:
@@ -76,6 +104,21 @@ def test_provider_key_is_masked_and_never_returned(client):
     assert "sk-test-super-secret" not in listed.text
 
 
+def test_openai_provider_key_is_used_for_embeddings(client, app):
+    connect_provider(client)
+
+    settings = app.state.container.settings
+    assert settings.openai_api_key is not None
+    assert settings.openai_embedding_api_key is not None
+    assert settings.openai_api_key.get_secret_value() == "sk-test-super-secret"
+    assert settings.openai_embedding_api_key.get_secret_value() == "sk-test-super-secret"
+
+    response = client.delete("/api/v1/providers/openai")
+    assert response.status_code == 204
+    assert settings.openai_api_key is None
+    assert settings.openai_embedding_api_key is None
+
+
 def test_source_pipeline_version_and_rag_chat(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)
@@ -111,6 +154,60 @@ def test_invalid_upload_returns_validation_error(client):
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
     assert client.get("/api/v1/sources").json() == []
+
+
+def test_pdf_upload_succeeds(client):
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("handbook.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["name"] == "handbook.pdf"
+    assert body["kind"] == "pdf"
+    assert body["chunk_count"] >= 1
+
+
+def test_upload_uses_sparse_index_when_openai_embedding_key_is_missing(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
+        vector_store_provider="postgres",
+        embedding_provider="openai",
+        openai_api_key=None,
+        openai_embedding_api_key=None,
+        openai_admin_api_key=None,
+        master_key_path=tmp_path / "master.key",
+        cors_origins=["http://testserver"],
+    )
+
+    with TestClient(create_app(settings)) as test_client:
+        response = test_client.post(
+            "/api/v1/sources/upload",
+            files={"file": ("handbook.pdf", PDF_WITH_TEXT, "application/pdf")},
+        )
+
+    assert response.status_code == 201
+    assert response.json()["chunk_count"] >= 1
+
+
+def test_pdf_upload_succeeds_when_dense_index_is_unavailable(client, app, monkeypatch):
+    def unavailable_vector_store(*_args, **_kwargs):
+        raise RuntimeError("vector index unavailable")
+
+    knowledge = app.state.container.sources.knowledge
+    monkeypatch.setattr(knowledge, "_should_use_sparse_only_index", lambda: False)
+    monkeypatch.setattr(knowledge, "_build_vector_store", unavailable_vector_store)
+
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("2024.emnlp-main.981.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["chunk_count"] >= 1
+    assert knowledge.search("Hello PDF upload", top_k=1)
 
 
 def test_tag_executes_only_validated_select(client, app, monkeypatch):

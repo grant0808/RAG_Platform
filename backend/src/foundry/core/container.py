@@ -33,7 +33,7 @@ class Container:
         cipher = CredentialCipher(settings.master_key_path)
         provider_client = ProviderClient(settings.provider_timeout_seconds)
         provider_quota = ProviderQuotaService(settings)
-        providers = ProviderService(cipher, provider_client)
+        providers = ProviderService(cipher, provider_client, settings)
         conversations = ConversationService()
         knowledge = KnowledgeIndex(settings)
         tables = TableStore(settings.data_dir / "tables.duckdb")
