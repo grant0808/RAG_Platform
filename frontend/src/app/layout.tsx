@@ -7,8 +7,9 @@ import "@fontsource/manrope/700.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Foundry — LLMOps Workbench",
-  description: "LangChain RAG, TAG, CAG 파이프라인을 구성하고 검증하는 로컬 워크벤치",
+  title: "Foundry - LLMOps Workbench",
+  description:
+    "LangChain RAG, TAG, CAG pipeline을 로컬에서 구성하고 검증하는 product workbench입니다.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

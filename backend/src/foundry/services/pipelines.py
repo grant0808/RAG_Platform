@@ -26,7 +26,7 @@ class PipelineSnapshot:
     similarity_threshold: float
 
     @classmethod
-    def from_version(cls, pipeline_id: str, version: PipelineVersion) -> "PipelineSnapshot":
+    def from_version(cls, pipeline_id: str, version: PipelineVersion) -> PipelineSnapshot:
         config: dict[str, Any] = version.config
         return cls(
             id=pipeline_id,

@@ -26,14 +26,13 @@ uv run uvicorn foundry.main:app --reload
 
 ```bash
 cd frontend
-cp .env.local.example .env.local
 npm install
 npm run dev
 ```
 
 브라우저에서 <http://localhost:3000>에 접속합니다. Backend OpenAPI는 <http://localhost:8000/docs>입니다.
 
-기본 API 주소는 `http://localhost:8000/api/v1`입니다. 다른 주소를 사용할 때 `.env.local`을 변경합니다.
+기본 API 주소는 `frontend/.env.local`의 `http://localhost:8000/api/v1`입니다. 다른 주소를 사용할 때 `.env.local`을 변경합니다.
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
@@ -42,10 +41,10 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ## 검증
 
 ```bash
-npm audit --audit-level=moderate
-npm run lint
-npm run build
+npm run verify
 ```
+
+`npm run verify`는 lint, TypeScript typecheck, production build를 순서대로 실행합니다. 의존성 보안 점검이 필요하면 네트워크가 가능한 환경에서 `npm audit --audit-level=moderate`를 별도로 실행합니다.
 
 ## 디자인 방향
 

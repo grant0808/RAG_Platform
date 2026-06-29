@@ -19,7 +19,7 @@ from foundry.core.config import Settings
 from foundry.core.errors import ConfigurationError, ValidationError
 from foundry.models import Pipeline
 from foundry.schemas import Citation, TraceEvent
-from foundry.services.knowledge import KnowledgeIndex
+from foundry.services.knowledge import KnowledgeIndex, SearchResult
 from foundry.services.local_model import LocalFakeChatModel
 from foundry.services.providers import ProviderService
 from foundry.services.tables import TableStore
@@ -86,18 +86,32 @@ class Orchestrator:
                 cached=True,
             )
 
+        messages = self._messages(pipeline, question, prepared.context, history or [])
         model = await self._model(session, pipeline)
         started = time.perf_counter()
-        response: AIMessage = await model.ainvoke(
-            self._messages(pipeline, question, prepared.context, history or [])
-        )
+        try:
+            response: AIMessage = await model.ainvoke(messages)
+            fallback_reason = None
+        except Exception as exc:
+            if not self._should_fallback_to_local_model(exc):
+                raise
+            response = await LocalFakeChatModel().ainvoke(messages)
+            fallback_reason = self._provider_error_summary(exc)
         duration = self._duration_ms(started)
+        metadata: dict[str, Any] = {"provider": pipeline.provider, "model": pipeline.model}
+        if fallback_reason:
+            metadata.update(
+                {
+                    "fallback": "local_model",
+                    "fallback_reason": fallback_reason,
+                }
+            )
         prepared.trace.append(
             TraceEvent(
                 step="chat_model",
                 status="completed",
                 duration_ms=duration,
-                metadata={"provider": pipeline.provider, "model": pipeline.model},
+                metadata=metadata,
             )
         )
         answer = self._message_text(response)
@@ -139,25 +153,47 @@ class Orchestrator:
             }
             return
 
+        messages = self._messages(pipeline, question, prepared.context, history or [])
         model = await self._model(session, pipeline)
         answer_parts: list[str] = []
         usage: dict[str, int] = {}
         started = time.perf_counter()
-        async for chunk in model.astream(
-            self._messages(pipeline, question, prepared.context, history or [])
-        ):
-            text = self._message_text(chunk)
-            if text:
-                answer_parts.append(text)
-                yield {"type": "token", "data": {"text": text}}
-            if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
-                usage = chunk.usage_metadata
+        fallback_reason = None
+        try:
+            async for chunk in model.astream(messages):
+                text = self._message_text(chunk)
+                if text:
+                    answer_parts.append(text)
+                    yield {"type": "token", "data": {"text": text}}
+                if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
+                    usage = chunk.usage_metadata
+        except Exception as exc:
+            if not self._should_fallback_to_local_model(exc):
+                raise
+            fallback_reason = self._provider_error_summary(exc)
+            answer_parts = []
+            usage = {}
+            async for chunk in LocalFakeChatModel().astream(messages):
+                text = self._message_text(chunk)
+                if text:
+                    answer_parts.append(text)
+                    yield {"type": "token", "data": {"text": text}}
+                if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
+                    usage = chunk.usage_metadata
+        metadata: dict[str, Any] = {"provider": pipeline.provider, "model": pipeline.model}
+        if fallback_reason:
+            metadata.update(
+                {
+                    "fallback": "local_model",
+                    "fallback_reason": fallback_reason,
+                }
+            )
         prepared.trace.append(
             TraceEvent(
                 step="chat_model",
                 status="completed",
                 duration_ms=self._duration_ms(started),
-                metadata={"provider": pipeline.provider, "model": pipeline.model},
+                metadata=metadata,
             )
         )
         answer = "".join(answer_parts)
@@ -199,12 +235,16 @@ class Orchestrator:
 
     async def _prepare_rag(self, pipeline: Pipeline, question: str) -> PreparedContext:
         started = time.perf_counter()
-        hits = await asyncio.to_thread(self.knowledge.search, question, pipeline.top_k)
-        filtered = [
-            (document, score) for document, score in hits if score >= pipeline.similarity_threshold
-        ]
-        citations = [self._citation(document, score) for document, score in filtered]
-        context = self._documents_context(document for document, _ in filtered)
+        candidate_k = max(pipeline.top_k * 4, pipeline.top_k)
+        hits = await asyncio.to_thread(
+            self.knowledge.search,
+            question,
+            pipeline.top_k,
+            candidate_k=candidate_k,
+        )
+        filtered = [hit for hit in hits if hit.score >= pipeline.similarity_threshold]
+        citations = [self._citation(hit.document, hit.score) for hit in filtered]
+        context = self._documents_context(hit.document for hit in filtered)
         return PreparedContext(
             context=context or "No relevant context was found.",
             citations=citations,
@@ -213,8 +253,25 @@ class Orchestrator:
                     step="retriever",
                     status="completed",
                     duration_ms=self._duration_ms(started),
-                    metadata={"documents": len(filtered), "top_k": pipeline.top_k},
-                )
+                    metadata={
+                        "mode": "hybrid",
+                        "documents": len(filtered),
+                        "top_k": pipeline.top_k,
+                        "candidate_k": candidate_k,
+                        "dense": True,
+                        "sparse": "bm25",
+                        "fusion": "reciprocal_rank_fusion",
+                    },
+                ),
+                TraceEvent(
+                    step="reranker",
+                    status="completed",
+                    duration_ms=0,
+                    metadata={
+                        "method": "local_lexical_cross_score",
+                        "scores": [self._result_scores(hit) for hit in filtered],
+                    },
+                ),
             ],
         )
 
@@ -232,9 +289,24 @@ class Orchestrator:
         if not sources:
             raise ConfigurationError("TAG requires at least one CSV or XLSX source")
 
+        table_hits = await asyncio.to_thread(
+            self.knowledge.search,
+            question,
+            max(pipeline.top_k, len(sources)),
+            candidate_k=max(pipeline.top_k * 4, len(sources)),
+            kind="table",
+        )
+        ranked_source_ids = [str(hit.document.metadata.get("source_id")) for hit in table_hits]
+        source_by_id = {source.id: source for source in sources}
+        ranked_sources = [
+            source_by_id[source_id]
+            for source_id in ranked_source_ids
+            if source_id in source_by_id
+        ]
+        ranked_sources.extend(source for source in sources if source.id not in ranked_source_ids)
         catalog_parts = [
             await asyncio.to_thread(self.tables.catalog_text, source.table_name)
-            for source in sources
+            for source in ranked_sources[: max(1, pipeline.top_k)]
             if source.table_name
         ]
         catalog = "\n\n".join(catalog_parts)
@@ -282,7 +354,11 @@ class Orchestrator:
                     step="safe_sql_tool",
                     status="completed",
                     duration_ms=duration,
-                    metadata={"sql": sql, "row_count": len(query_result["rows"])},
+                    metadata={
+                        "sql": sql,
+                        "row_count": len(query_result["rows"]),
+                        "table_selection": "hybrid_catalog_retrieval",
+                    },
                 )
             ],
         )
@@ -327,6 +403,29 @@ class Orchestrator:
             return ChatAnthropic(model=pipeline.model, api_key=api_key, streaming=True)
         raise ConfigurationError(f"Unsupported pipeline provider: {pipeline.provider}")
 
+    def _should_fallback_to_local_model(self, exc: Exception) -> bool:
+        return (
+            self.settings.fallback_to_local_model_on_provider_quota
+            and self._is_provider_quota_error(exc)
+        )
+
+    @staticmethod
+    def _is_provider_quota_error(exc: Exception) -> bool:
+        value = str(exc).lower()
+        code = str(getattr(exc, "code", "")).lower()
+        status_code = getattr(exc, "status_code", None)
+        return (
+            status_code == 429
+            or code in {"insufficient_quota", "rate_limit_exceeded"}
+            or "insufficient_quota" in value
+            or "exceeded your current quota" in value
+        )
+
+    @staticmethod
+    def _provider_error_summary(exc: Exception) -> str:
+        value = " ".join(str(exc).split())
+        return value[:500]
+
     def _execute_sql(self, sql: str, allowed_tables: list[str]) -> dict[str, Any]:
         return self.tables.execute_safe(sql, allowed_tables=set(allowed_tables))
 
@@ -361,10 +460,25 @@ class Orchestrator:
 
     @staticmethod
     def _documents_context(documents: Any) -> str:
-        return "\n\n".join(
+        return "\n\n".join(Orchestrator._document_context(document) for document in documents)
+
+    @staticmethod
+    def _document_context(document: Document) -> str:
+        original_text = document.metadata.get("original_text") or document.page_content
+        before = document.metadata.get("late_context_before")
+        after = document.metadata.get("late_context_after")
+        late_context = "\n".join(
+            part
+            for part in [
+                f"Previous context: {before}" if before else "",
+                f"Chunk text: {original_text}",
+                f"Next context: {after}" if after else "",
+            ]
+            if part
+        )
+        return (
             f"Source: {document.metadata.get('source_name')} "
-            f"({document.metadata.get('location')})\n{document.page_content}"
-            for document in documents
+            f"({document.metadata.get('location')})\n{late_context}"
         )
 
     @staticmethod
@@ -375,6 +489,18 @@ class Orchestrator:
             location=str(document.metadata.get("location", "")) or None,
             score=round(float(score), 4),
         )
+
+    @staticmethod
+    def _result_scores(hit: SearchResult) -> dict[str, float | str | None]:
+        return {
+            "source": str(hit.document.metadata.get("source_name")),
+            "location": str(hit.document.metadata.get("location")),
+            "score": round(hit.score, 4),
+            "dense": round(hit.dense_score, 4),
+            "sparse": round(hit.sparse_score, 4),
+            "fusion": round(hit.fusion_score, 4),
+            "rerank": round(hit.rerank_score, 4),
+        }
 
     @staticmethod
     def _extract_sql(value: str) -> str:

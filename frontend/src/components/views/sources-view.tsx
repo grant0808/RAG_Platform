@@ -6,31 +6,68 @@ import { EmptyState, PageHeading, StatusBadge, formatBytes, formatDate } from "@
 import { api } from "@/lib/api";
 import type { AppSnapshot } from "@/lib/types";
 
-export function SourcesView({ snapshot, refresh, notify }: { snapshot: AppSnapshot; refresh: () => Promise<void>; notify: (message: string) => void }) {
+export function SourcesView({
+  snapshot,
+  refresh,
+  notify,
+}: {
+  snapshot: AppSnapshot;
+  refresh: () => Promise<void>;
+  notify: (message: string) => void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ completed: number; total: number } | null>(
+    null,
+  );
   const totalSize = snapshot.sources.reduce((total, source) => total + source.size_bytes, 0);
   const tables = snapshot.sources.filter((source) => source.kind === "table").length;
 
-  async function upload(file: File) {
+  async function upload(files: File[]) {
+    if (!files.length) return;
     setUploading(true);
+    setUploadProgress({ completed: 0, total: files.length });
+    const uploaded: string[] = [];
+    const failed: string[] = [];
     try {
-      const source = await api.uploadSource(file);
-      notify(`${source.name}을 인덱싱했습니다.`);
+      for (const file of files) {
+        try {
+          const source = await api.uploadSource(file);
+          uploaded.push(source.name);
+        } catch (caught) {
+          const message =
+            caught instanceof Error ? caught.message : "Upload failed. 파일을 다시 확인해 주세요.";
+          failed.push(`${file.name}: ${message}`);
+        } finally {
+          setUploadProgress((current) =>
+            current ? { ...current, completed: current.completed + 1 } : current,
+          );
+        }
+      }
+      if (uploaded.length && failed.length === 0) {
+        notify(
+          uploaded.length === 1
+            ? `${uploaded[0]} 인덱싱을 완료했습니다.`
+            : `${uploaded.length}개 파일 인덱싱을 완료했습니다.`,
+        );
+      } else if (uploaded.length) {
+        notify(`${uploaded.length}개 파일 인덱싱 완료, ${failed.length}개 실패: ${failed[0]}`);
+      } else {
+        notify(`${failed.length}개 파일 업로드에 실패했습니다: ${failed[0]}`);
+      }
       await refresh();
-    } catch (caught) {
-      notify(caught instanceof Error ? caught.message : "업로드에 실패했습니다.");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
 
   async function remove(id: string, name: string) {
-    if (!window.confirm(`${name}과 관련 인덱스를 삭제할까요?`)) return;
+    if (!window.confirm(`${name} source와 관련 인덱스를 삭제할까요?`)) return;
     try {
       await api.deleteSource(id);
-      notify(`${name}을 삭제했습니다.`);
+      notify(`${name} source를 삭제했습니다.`);
       await refresh();
     } catch (caught) {
       notify(caught instanceof Error ? caught.message : "삭제에 실패했습니다.");
@@ -39,26 +76,91 @@ export function SourcesView({ snapshot, refresh, notify }: { snapshot: AppSnapsh
 
   return (
     <section className="page">
-      <PageHeading index="02" title="Connect every" outline="source." description="파일은 업로드 즉시 문서 chunk 또는 TAG 테이블로 변환되며 실행 가능한 상태가 응답으로 확정됩니다." action={<><input ref={inputRef} className="visually-hidden" type="file" accept=".txt,.md,.json,.html,.pdf,.csv,.xlsx,.xlsm" onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])} /><button className="button primary" disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "Processing…" : "+ Upload source"}</button></>} />
+      <PageHeading
+        index="02"
+        title="Connect every"
+        outline="source."
+        description="문서는 RAG chunks로, 테이블은 TAG catalog로 등록합니다. 업로드 즉시 index가 생성되어 Playground에서 바로 사용할 수 있습니다."
+        action={
+          <>
+            <input
+              ref={inputRef}
+              className="visually-hidden"
+              type="file"
+              multiple
+              accept=".txt,.md,.json,.html,.pdf,.csv,.xlsx,.xlsm"
+              onChange={(event) => void upload(Array.from(event.target.files ?? []))}
+            />
+            <button
+              className="button primary"
+              disabled={uploading}
+              onClick={() => inputRef.current?.click()}
+            >
+              {uploadProgress
+                ? `Indexing ${uploadProgress.completed}/${uploadProgress.total}`
+                : "+ Upload source"}
+            </button>
+          </>
+        }
+      />
       <div className="source-summary">
-        <div><strong>{snapshot.sources.length}</strong><span>Ready sources</span></div>
-        <div><strong>{tables}</strong><span>TAG tables</span></div>
-        <div><strong>{formatBytes(totalSize)}</strong><span>Original data</span></div>
+        <div>
+          <strong>{snapshot.sources.length}</strong>
+          <span>Ready sources</span>
+        </div>
+        <div>
+          <strong>{tables}</strong>
+          <span>TAG tables</span>
+        </div>
+        <div>
+          <strong>{formatBytes(totalSize)}</strong>
+          <span>Original data</span>
+        </div>
       </div>
-      <div className="drop-zone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void upload(file); }}>
-        <span>DROP / KNOWLEDGE</span><strong>문서 또는 테이블을 여기에 놓으세요.</strong><small>TXT · MD · JSON · HTML · PDF · CSV · XLSX · XLSM / 최대 20 MiB</small>
+      <div
+        className="drop-zone"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          void upload(Array.from(event.dataTransfer.files));
+        }}
+      >
+        <span>DATA PLANE / DROP KNOWLEDGE</span>
+        <strong>문서 또는 테이블 파일을 여기로 끌어오세요.</strong>
+        <small>TXT / MD / JSON / HTML / PDF / CSV / XLSX / XLSM, 최대 20 MiB</small>
       </div>
-      <div className="section-title"><h2>Source registry</h2><span>{snapshot.sources.length} READY</span></div>
-      {snapshot.sources.length === 0 ? <EmptyState title="아직 연결된 소스가 없습니다.">첫 문서나 표를 업로드해 RAG·TAG를 시작하세요.</EmptyState> : (
+      <div className="section-title">
+        <h2>Source registry</h2>
+        <span>{snapshot.sources.length} READY</span>
+      </div>
+      {snapshot.sources.length === 0 ? (
+        <EmptyState title="아직 연결된 source가 없습니다.">
+          문서나 테이블을 업로드해 RAG와 TAG 테스트를 시작하세요.
+        </EmptyState>
+      ) : (
         <div className="source-list">
           {snapshot.sources.map((source, index) => (
             <article className="source-row" key={source.id}>
               <span className="source-index">{String(index + 1).padStart(2, "0")}</span>
-              <div className="source-kind">{source.kind === "table" ? "▦" : "▤"}</div>
-              <div className="source-name"><strong>{source.name}</strong><span>{source.table_name ?? `${source.chunk_count} chunks`}</span></div>
-              <div><StatusBadge>{source.status.toUpperCase()}</StatusBadge></div>
-              <div className="source-meta"><span>{formatBytes(source.size_bytes)}</span><small>{formatDate(source.created_at)}</small></div>
-              <button className="icon-danger" onClick={() => void remove(source.id, source.name)} aria-label={`${source.name} 삭제`}>×</button>
+              <div className="source-kind">{source.kind === "table" ? "TB" : "DC"}</div>
+              <div className="source-name">
+                <strong>{source.name}</strong>
+                <span>{source.table_name ?? `${source.chunk_count} chunks`}</span>
+              </div>
+              <div>
+                <StatusBadge>{source.status.toUpperCase()}</StatusBadge>
+              </div>
+              <div className="source-meta">
+                <span>{formatBytes(source.size_bytes)}</span>
+                <small>{formatDate(source.created_at)}</small>
+              </div>
+              <button
+                className="icon-danger"
+                onClick={() => void remove(source.id, source.name)}
+                aria-label={`${source.name} 삭제`}
+              >
+                x
+              </button>
             </article>
           ))}
         </div>

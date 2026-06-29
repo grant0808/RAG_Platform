@@ -12,6 +12,11 @@ def app(tmp_path):
     settings = Settings(
         data_dir=tmp_path / "data",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
+        vector_store_provider="memory",
+        embedding_provider="local",
+        openai_api_key=None,
+        openai_embedding_api_key=None,
+        openai_admin_api_key=None,
         master_key_path=tmp_path / "master.key",
         cors_origins=["http://testserver"],
     )

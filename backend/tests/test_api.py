@@ -1,4 +1,32 @@
+from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, AIMessageChunk
+
+from foundry.core.config import Settings
+from foundry.main import create_app
+
+PDF_WITH_TEXT = (
+    b"%PDF-1.4\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+    b"/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj\n"
+    b"4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
+    b"5 0 obj<</Length 44>>stream\n"
+    b"BT /F1 24 Tf 72 720 Td (Hello PDF upload) Tj ET\n"
+    b"endstream endobj\n"
+    b"xref\n"
+    b"0 6\n"
+    b"0000000000 65535 f \n"
+    b"0000000009 00000 n \n"
+    b"0000000058 00000 n \n"
+    b"0000000115 00000 n \n"
+    b"0000000241 00000 n \n"
+    b"0000000311 00000 n \n"
+    b"trailer<</Size 6/Root 1 0 R>>\n"
+    b"startxref\n"
+    b"405\n"
+    b"%%EOF\n"
+)
 
 
 class FakeChatModel:
@@ -23,6 +51,21 @@ class FakeChatModel:
             content="가 가장 많습니다.",
             usage_metadata={"input_tokens": 20, "output_tokens": 8, "total_tokens": 28},
         )
+
+
+class FailingStreamModel:
+    async def astream(self, _messages):
+        raise RuntimeError("model unavailable")
+        yield
+
+
+class QuotaLimitedModel:
+    async def ainvoke(self, _messages):
+        raise RuntimeError("Error code: 429 - insufficient_quota")
+
+    async def astream(self, _messages):
+        raise RuntimeError("Error code: 429 - insufficient_quota")
+        yield
 
 
 def connect_provider(client):
@@ -76,6 +119,67 @@ def test_provider_key_is_masked_and_never_returned(client):
     assert "sk-test-super-secret" not in listed.text
 
 
+def test_openai_provider_key_is_used_for_embeddings(client, app):
+    connect_provider(client)
+
+    settings = app.state.container.settings
+    assert settings.openai_api_key is not None
+    assert settings.openai_embedding_api_key is not None
+    assert settings.openai_api_key.get_secret_value() == "sk-test-super-secret"
+    assert settings.openai_embedding_api_key.get_secret_value() == "sk-test-super-secret"
+
+    response = client.delete("/api/v1/providers/openai")
+    assert response.status_code == 204
+    assert settings.openai_api_key is None
+    assert settings.openai_embedding_api_key is None
+
+
+def test_pipeline_default_model_is_openai_chat_default(client):
+    connect_provider(client)
+
+    response = client.post(
+        "/api/v1/pipelines",
+        json={"name": "Default model RAG", "strategy": "rag", "provider": "openai"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["model"] == "gpt-4o-mini"
+
+
+def test_startup_rewrites_invalid_openai_pipeline_models(tmp_path):
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+    common_settings = {
+        "data_dir": tmp_path / "data",
+        "database_url": database_url,
+        "vector_store_provider": "memory",
+        "embedding_provider": "local",
+        "openai_api_key": None,
+        "openai_embedding_api_key": None,
+        "openai_admin_api_key": None,
+        "master_key_path": tmp_path / "master.key",
+        "cors_origins": ["http://testserver"],
+    }
+    fake_settings = Settings(fake_llm_enabled=True, **common_settings)
+    with TestClient(create_app(fake_settings)) as first_client:
+        connect_provider(first_client)
+        response = first_client.post(
+            "/api/v1/pipelines",
+            json={
+                "name": "Old local model",
+                "strategy": "rag",
+                "provider": "openai",
+                "model": "gpt-local-demo",
+            },
+        )
+        assert response.status_code == 201
+
+    real_settings = Settings(fake_llm_enabled=False, **common_settings)
+    with TestClient(create_app(real_settings)) as second_client:
+        pipelines = second_client.get("/api/v1/pipelines").json()
+
+    assert pipelines[0]["model"] == "gpt-4o-mini"
+
+
 def test_source_pipeline_version_and_rag_chat(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)
@@ -100,6 +204,71 @@ def test_source_pipeline_version_and_rag_chat(client, app, monkeypatch):
     assert body["strategy"] == "rag"
     assert body["citations"][0]["source_name"] == "handbook.md"
     assert any(event["step"] == "retriever" for event in body["trace"])
+
+
+def test_invalid_upload_returns_validation_error(client):
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("broken.pdf", b"this is not a valid pdf")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert client.get("/api/v1/sources").json() == []
+
+
+def test_pdf_upload_succeeds(client):
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("handbook.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["name"] == "handbook.pdf"
+    assert body["kind"] == "pdf"
+    assert body["chunk_count"] >= 1
+
+
+def test_upload_uses_sparse_index_when_openai_embedding_key_is_missing(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
+        vector_store_provider="postgres",
+        embedding_provider="openai",
+        openai_api_key=None,
+        openai_embedding_api_key=None,
+        openai_admin_api_key=None,
+        master_key_path=tmp_path / "master.key",
+        cors_origins=["http://testserver"],
+    )
+
+    with TestClient(create_app(settings)) as test_client:
+        response = test_client.post(
+            "/api/v1/sources/upload",
+            files={"file": ("handbook.pdf", PDF_WITH_TEXT, "application/pdf")},
+        )
+
+    assert response.status_code == 201
+    assert response.json()["chunk_count"] >= 1
+
+
+def test_pdf_upload_succeeds_when_dense_index_is_unavailable(client, app, monkeypatch):
+    def unavailable_vector_store(*_args, **_kwargs):
+        raise RuntimeError("vector index unavailable")
+
+    knowledge = app.state.container.sources.knowledge
+    monkeypatch.setattr(knowledge, "_should_use_sparse_only_index", lambda: False)
+    monkeypatch.setattr(knowledge, "_build_vector_store", unavailable_vector_store)
+
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("2024.emnlp-main.981.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["chunk_count"] >= 1
+    assert knowledge.search("Hello PDF upload", top_k=1)
 
 
 def test_tag_executes_only_validated_select(client, app, monkeypatch):
@@ -331,6 +500,84 @@ def test_chat_stream_emits_trace_tokens_and_done(client, app, monkeypatch):
     assert "event: trace" in body
     assert "event: token" in body
     assert "event: done" in body
+
+
+def test_chat_stream_emits_error_event_for_runtime_failures(client, app, monkeypatch):
+    connect_provider(client)
+
+    async def failing_model(*_args, **_kwargs):
+        return FailingStreamModel()
+
+    monkeypatch.setattr(app.state.container.orchestrator, "_model", failing_model)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("guide.txt", "RAG guide")},
+    )
+    pipeline = create_pipeline(client, "rag")
+
+    with client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        json={"pipeline_id": pipeline["id"], "message": "hello"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: error" in body
+    assert "model unavailable" in body
+
+
+def test_chat_stream_falls_back_to_local_model_for_provider_quota(client, app, monkeypatch):
+    connect_provider(client)
+
+    async def quota_limited_model(*_args, **_kwargs):
+        return QuotaLimitedModel()
+
+    monkeypatch.setattr(app.state.container.orchestrator, "_model", quota_limited_model)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("guide.txt", "RAG guide")},
+    )
+    pipeline = create_pipeline(client, "rag")
+
+    with client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        json={"pipeline_id": pipeline["id"], "message": "hello"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: token" in body
+    assert "event: done" in body
+    assert "event: error" not in body
+    assert "local_model" in body
+    assert "insufficient_quota" in body
+
+
+def test_chat_falls_back_to_local_model_for_provider_quota(client, app, monkeypatch):
+    connect_provider(client)
+
+    async def quota_limited_model(*_args, **_kwargs):
+        return QuotaLimitedModel()
+
+    monkeypatch.setattr(app.state.container.orchestrator, "_model", quota_limited_model)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("guide.txt", "RAG guide")},
+    )
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "hello"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"]
+    assert body["trace"][-1]["metadata"]["fallback"] == "local_model"
+    assert "insufficient_quota" in body["trace"][-1]["metadata"]["fallback_reason"]
 
 
 def test_stream_chat_persists_session_and_uses_history(client, app, monkeypatch):
