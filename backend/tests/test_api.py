@@ -1,5 +1,8 @@
+from io import BytesIO
+
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, AIMessageChunk
+from pypdf import PdfWriter
 
 from foundry.core.config import Settings
 from foundry.main import create_app
@@ -180,6 +183,32 @@ def test_startup_rewrites_invalid_openai_pipeline_models(tmp_path):
     assert pipelines[0]["model"] == "gpt-4o-mini"
 
 
+def test_ollama_provider_can_connect_with_default_base_url(client):
+    response = client.put(
+        "/api/v1/providers/ollama",
+        json={"api_key": "", "validate_connection": False},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "ollama"
+    assert body["masked_key"].endswith("1434")
+    assert body["models"] == []
+
+    pipeline = client.post(
+        "/api/v1/pipelines",
+        json={
+            "name": "Ollama RAG",
+            "strategy": "rag",
+            "provider": "ollama",
+            "model": "llama3.1",
+            "similarity_threshold": 0,
+        },
+    )
+    assert pipeline.status_code == 201
+    assert pipeline.json()["provider"] == "ollama"
+
+
 def test_source_pipeline_version_and_rag_chat(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)
@@ -230,6 +259,25 @@ def test_pdf_upload_succeeds(client):
     assert body["chunk_count"] >= 1
 
 
+def test_valid_pdf_without_extractable_text_is_saved_as_no_text_source(client):
+    buffer = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.write(buffer)
+
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("scanned-or-blank.pdf", buffer.getvalue())},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["kind"] == "pdf"
+    assert body["status"] == "no_text"
+    assert body["chunk_count"] == 0
+    assert client.get("/api/v1/sources").json()[0]["name"] == "scanned-or-blank.pdf"
+
+
 def test_upload_uses_sparse_index_when_openai_embedding_key_is_missing(tmp_path):
     settings = Settings(
         data_dir=tmp_path / "data",
@@ -251,6 +299,27 @@ def test_upload_uses_sparse_index_when_openai_embedding_key_is_missing(tmp_path)
 
     assert response.status_code == 201
     assert response.json()["chunk_count"] >= 1
+
+
+
+def test_upload_returns_configuration_error_when_indexing_fails(client, app, monkeypatch):
+    def broken_add_documents(_documents):
+        raise RuntimeError("embedding backend unavailable")
+
+    monkeypatch.setattr(
+        app.state.container.sources.knowledge,
+        "add_documents",
+        broken_add_documents,
+    )
+
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("handbook.md", "Atlas Pro support handbook and warranty policy.")},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "configuration_error"
+    assert client.get("/api/v1/sources").json() == []
 
 
 def test_pdf_upload_succeeds_when_dense_index_is_unavailable(client, app, monkeypatch):

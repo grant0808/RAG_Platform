@@ -20,11 +20,14 @@ class Settings(BaseSettings):
     vector_store_provider: str = "postgres"
     vector_database_url: str = "postgresql+psycopg://foundry:foundry@localhost:5432/foundry"
     vector_collection_name: str = "foundry_documents"
-    embedding_provider: str = "openai"
+    embedding_provider: str = "huggingface"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_api_key: SecretStr | None = None
+    huggingface_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     openai_api_key: SecretStr | None = None
     openai_chat_model: str = "gpt-4o-mini"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_chat_model: str = "llama3.1"
     redis_url: str = "redis://localhost:6379/0"
     master_key_path: Path = Path(".data/master.key")
     cors_origins: list[str] = Field(

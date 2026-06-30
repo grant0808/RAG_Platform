@@ -329,10 +329,19 @@ class KnowledgeIndex:
     def _build_embeddings(self) -> Embeddings:
         if self.settings.embedding_provider == "local":
             return LocalHashEmbeddings()
+        if self.settings.embedding_provider == "huggingface":
+            try:
+                from langchain_huggingface import HuggingFaceEmbeddings
+            except ImportError as exc:
+                raise ConfigurationError(
+                    "Hugging Face embeddings require the langchain-huggingface and "
+                    "sentence-transformers packages. Run `uv sync` after updating dependencies."
+                ) from exc
+            return HuggingFaceEmbeddings(model_name=self.settings.huggingface_embedding_model)
         if self.settings.embedding_provider != "openai":
             raise ConfigurationError(
                 f"Unsupported embedding provider: {self.settings.embedding_provider}. "
-                "Supported values: 'openai', 'local'."
+                "Supported values: 'openai', 'huggingface', 'local'."
             )
         api_key = self._configured_openai_api_key()
         if api_key is None:

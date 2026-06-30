@@ -10,6 +10,7 @@ from fastapi import UploadFile
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,8 @@ from foundry.services.tables import TableStore, safe_identifier
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".json", ".html", ".pdf", ".csv", ".xlsx", ".xlsm"}
 PYPDF_LOGGERS = ("pypdf", "pypdf._reader", "pypdf.generic._image_inline")
+NO_TEXT_STATUS = "no_text"
+READY_STATUS = "ready"
 
 
 class SourceService:
@@ -70,11 +73,14 @@ class SourceService:
                 documents = [self._document(source, content, "table_catalog")]
             else:
                 content = await asyncio.to_thread(self._extract_text, path, payload, suffix)
-                documents = self._split_documents(source, content)
+                documents = self._split_documents(source, content, allow_empty=suffix == ".pdf")
 
-            source.chunk_count = self.knowledge.add_documents(documents)
-            source.status = "ready"
+            source.chunk_count = self._index_documents(documents) if documents else 0
+            source.status = READY_STATUS if documents else NO_TEXT_STATUS
         except ValidationError:
+            await self._cleanup_failed_ingest(path, source.table_name)
+            raise
+        except ConfigurationError:
             await self._cleanup_failed_ingest(path, source.table_name)
             raise
         except OSError as exc:
@@ -110,7 +116,7 @@ class SourceService:
 
     async def rebuild(self, session: AsyncSession) -> None:
         self.knowledge.reset()
-        result = await session.execute(select(Source).where(Source.status == "ready"))
+        result = await session.execute(select(Source).where(Source.status == READY_STATUS))
         for source in result.scalars():
             path = Path(source.path)
             if not await asyncio.to_thread(path.exists):
@@ -126,10 +132,20 @@ class SourceService:
             else:
                 payload = await asyncio.to_thread(path.read_bytes)
                 content = await asyncio.to_thread(self._extract_text, path, payload, suffix)
-                self.knowledge.add_documents(self._split_documents(source, content))
+                self.knowledge.add_documents(
+                    self._split_documents(source, content, allow_empty=False)
+                )
 
-    def _split_documents(self, source: Source, content: str) -> list[Document]:
+    def _split_documents(
+        self,
+        source: Source,
+        content: str,
+        *,
+        allow_empty: bool = False,
+    ) -> list[Document]:
         if not content.strip():
+            if allow_empty:
+                return []
             raise ValidationError("No text could be extracted from the file")
         base = self._document(source, content, "document")
         documents = self.splitter.split_documents([base])
@@ -188,6 +204,16 @@ class SourceService:
         if await asyncio.to_thread(path.exists):
             await asyncio.to_thread(path.unlink)
 
+    def _index_documents(self, documents: list[Document]) -> int:
+        try:
+            return self.knowledge.add_documents(documents)
+        except ConfigurationError:
+            raise
+        except Exception as exc:
+            raise ConfigurationError(
+                "Knowledge index is unavailable. Check embedding/vector store configuration."
+            ) from exc
+
     @staticmethod
     def _extract_text(path: Path, payload: bytes, suffix: str) -> str:
         if suffix == ".pdf":
@@ -197,8 +223,14 @@ class SourceService:
             try:
                 for logger, _level in previous_levels:
                     logger.setLevel(logging.CRITICAL + 1)
-                reader = PdfReader(BytesIO(payload))
-                return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+                try:
+                    reader = PdfReader(BytesIO(payload))
+                    page_texts = [page.extract_text() or "" for page in reader.pages]
+                except PdfReadError as exc:
+                    raise ValidationError(f"Invalid PDF file: {path.name}") from exc
+                except Exception as exc:
+                    raise ValidationError(f"PDF text extraction failed: {path.name}") from exc
+                return "\n\n".join(page_texts)
             finally:
                 for logger, level in previous_levels:
                     logger.setLevel(level)

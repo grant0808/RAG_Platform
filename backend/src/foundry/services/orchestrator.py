@@ -401,6 +401,15 @@ class Orchestrator:
             return ChatOpenAI(model=pipeline.model, api_key=api_key, streaming=True)
         if pipeline.provider == "anthropic":
             return ChatAnthropic(model=pipeline.model, api_key=api_key, streaming=True)
+        if pipeline.provider == "ollama":
+            try:
+                from langchain_ollama import ChatOllama
+            except ImportError as exc:
+                raise ConfigurationError(
+                    "Ollama provider requires the langchain-ollama package. "
+                    "Run `uv sync` after updating dependencies."
+                ) from exc
+            return ChatOllama(model=pipeline.model, base_url=api_key, streaming=True)
         raise ConfigurationError(f"Unsupported pipeline provider: {pipeline.provider}")
 
     def _should_fallback_to_local_model(self, exc: Exception) -> bool:

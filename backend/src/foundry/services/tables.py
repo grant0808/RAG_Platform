@@ -40,12 +40,21 @@ def safe_identifier(value: str) -> str:
 class TableStore:
     def __init__(self, database_path: Path) -> None:
         database_path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = duckdb.connect(str(database_path))
+        self.database_path = database_path
+        self._connection: duckdb.DuckDBPyConnection | None = None
         self.lock = threading.Lock()
+
+    @property
+    def connection(self) -> duckdb.DuckDBPyConnection:
+        if self._connection is None:
+            self._connection = duckdb.connect(str(self.database_path))
+        return self._connection
 
     def close(self) -> None:
         with self.lock:
-            self.connection.close()
+            if self._connection is not None:
+                self._connection.close()
+                self._connection = None
 
     def import_file(self, path: Path, table_name: str) -> None:
         with self.lock:

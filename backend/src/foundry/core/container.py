@@ -33,7 +33,10 @@ class Container:
         settings.prepare_directories()
         database = Database(settings.database_url)
         cipher = CredentialCipher(settings.master_key_path)
-        provider_client = ProviderClient(settings.provider_timeout_seconds)
+        provider_client = ProviderClient(
+            settings.provider_timeout_seconds,
+            settings.ollama_base_url,
+        )
         provider_quota = ProviderQuotaService(settings)
         providers = ProviderService(cipher, provider_client, settings)
         conversations = ConversationService()

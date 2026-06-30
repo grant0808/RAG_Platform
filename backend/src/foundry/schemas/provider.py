@@ -6,7 +6,7 @@ from foundry.schemas.base import OrmModel
 
 
 class ProviderConnectRequest(BaseModel):
-    api_key: SecretStr = Field(min_length=8)
+    api_key: SecretStr = Field(default=SecretStr(""), min_length=0)
     validate_connection: bool = True
 
 

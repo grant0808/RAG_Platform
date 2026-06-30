@@ -10,20 +10,25 @@ from foundry.core.crypto import CredentialCipher, mask_secret
 from foundry.core.errors import NotFoundError, ProviderError, ValidationError
 from foundry.models import ProviderConnection
 
-SUPPORTED_PROVIDERS = {"openai", "anthropic"}
+SUPPORTED_PROVIDERS = {"openai", "anthropic", "ollama"}
 
 
 class ProviderClient:
-    def __init__(self, timeout_seconds: float) -> None:
+    def __init__(self, timeout_seconds: float, ollama_base_url: str) -> None:
         self.timeout = httpx.Timeout(timeout_seconds)
+        self.ollama_base_url = ollama_base_url.rstrip("/")
 
-    async def list_models(self, provider: str, api_key: str) -> list[str]:
+    async def list_models(self, provider: str, credential: str) -> list[str]:
         if provider == "openai":
             url = "https://api.openai.com/v1/models"
-            headers = {"Authorization": f"Bearer {api_key}"}
+            headers = {"Authorization": f"Bearer {credential}"}
         elif provider == "anthropic":
             url = "https://api.anthropic.com/v1/models"
-            headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+            headers = {"x-api-key": credential, "anthropic-version": "2023-06-01"}
+        elif provider == "ollama":
+            base_url = (credential or self.ollama_base_url).rstrip("/")
+            url = f"{base_url}/api/tags"
+            headers = {}
         else:
             raise ValidationError(f"Unsupported provider: {provider}")
 
@@ -40,8 +45,16 @@ class ProviderClient:
         except httpx.HTTPError as exc:
             raise ProviderError("Provider model discovery is unavailable") from exc
 
-        data = response.json().get("data", [])
-        model_ids = sorted({item["id"] for item in data if isinstance(item.get("id"), str)})
+        payload = response.json()
+        data = payload.get("models", []) if provider == "ollama" else payload.get("data", [])
+        model_ids = sorted(
+            {
+                value
+                for item in data
+                for value in (item.get("id"), item.get("name"), item.get("model"))
+                if isinstance(value, str)
+            }
+        )
         if provider == "openai":
             model_ids = [model for model in model_ids if model.startswith(("gpt-", "o"))]
         return model_ids
@@ -69,6 +82,7 @@ class ProviderService:
         provider = provider.lower()
         if provider not in SUPPORTED_PROVIDERS:
             raise ValidationError(f"Unsupported provider: {provider}")
+        api_key = self._normalize_credential(provider, api_key)
 
         models = await self.client.list_models(provider, api_key) if validate_connection else []
         result = await session.execute(
@@ -150,3 +164,11 @@ class ProviderService:
     @staticmethod
     def _secret_matches(secret: SecretStr | None, value: str) -> bool:
         return secret is not None and secret.get_secret_value() == value
+
+    def _normalize_credential(self, provider: str, credential: str) -> str:
+        value = credential.strip()
+        if provider == "ollama":
+            return (value or self.settings.ollama_base_url).rstrip("/")
+        if not value:
+            raise ValidationError(f"{provider} API key is required")
+        return value
