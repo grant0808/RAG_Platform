@@ -126,7 +126,11 @@ export function ProvidersView({
                 </label>
                 <label className="checkbox-row">
                   <input type="checkbox" name="validate" defaultChecked />
-                  <span>Provider model API로 실제 model list 검증</span>
+                  <span>
+                    {definition.id === "ollama"
+                      ? "Local Ollama /api/tags로 model list 검증"
+                      : "Provider model API로 실제 model list 검증"}
+                  </span>
                 </label>
                 <div className="provider-actions">
                   <button className="button primary" disabled={busy === definition.id}>
