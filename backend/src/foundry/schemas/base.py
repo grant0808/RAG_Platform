@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 ProviderName = Literal["openai", "anthropic", "ollama"]
-StrategyName = Literal["rag", "tag", "cag"]
+StrategyName = Literal["rag"]
 
 
 class OrmModel(BaseModel):

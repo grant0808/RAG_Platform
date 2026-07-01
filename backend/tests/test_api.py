@@ -37,11 +37,6 @@ class FakeChatModel:
 
     async def ainvoke(self, messages):
         type(self).seen_messages.append(messages)
-        system_text = str(messages[0].content)
-        if "Generate exactly one DuckDB SELECT query" in system_text:
-            return AIMessage(
-                content='SELECT product, tickets FROM "source_table" ORDER BY tickets DESC'
-            )
         return AIMessage(
             content="Atlas Pro가 가장 많은 문의를 받았습니다.",
             usage_metadata={"input_tokens": 20, "output_tokens": 8, "total_tokens": 28},
@@ -340,53 +335,30 @@ def test_pdf_upload_succeeds_when_dense_index_is_unavailable(client, app, monkey
     assert knowledge.search("Hello PDF upload", top_k=1)
 
 
-def test_tag_executes_only_validated_select(client, app, monkeypatch):
-    connect_provider(client)
-    install_fake_model(app, monkeypatch)
-    upload = client.post(
+def test_table_upload_is_no_longer_supported(client):
+    response = client.post(
         "/api/v1/sources/upload",
         files={"file": ("support.csv", "product,tickets\nAtlas Pro,1284\nNova,410\n")},
     )
-    assert upload.status_code == 201
-    table_name = upload.json()["table_name"]
 
-    original_ainvoke = FakeChatModel.ainvoke
-
-    async def tag_aware_ainvoke(self, messages):
-        if "Generate exactly one DuckDB SELECT query" in str(messages[0].content):
-            return AIMessage(
-                content=f'SELECT product, tickets FROM "{table_name}" ORDER BY tickets DESC'
-            )
-        return await original_ainvoke(self, messages)
-
-    monkeypatch.setattr(FakeChatModel, "ainvoke", tag_aware_ainvoke)
-    pipeline = create_pipeline(client, "tag")
-    response = client.post(
-        "/api/v1/chat",
-        json={"pipeline_id": pipeline["id"], "message": "문의가 가장 많은 제품은?"},
-    )
-
-    assert response.status_code == 200
-    assert any(event["step"] == "safe_sql_tool" for event in response.json()["trace"])
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
 
 
-def test_cag_returns_cached_second_response(client, app, monkeypatch):
+def test_non_rag_strategy_is_rejected(client):
     connect_provider(client)
-    install_fake_model(app, monkeypatch)
-    client.post(
-        "/api/v1/sources/upload",
-        files={"file": ("metrics.txt", "The p95 target is three seconds.")},
+
+    response = client.post(
+        "/api/v1/pipelines",
+        json={
+            "name": "Invalid strategy assistant",
+            "strategy": "sql",
+            "provider": "openai",
+            "model": "gpt-test",
+        },
     )
-    pipeline = create_pipeline(client, "cag")
-    payload = {"pipeline_id": pipeline["id"], "message": "응답 목표는?"}
 
-    first = client.post("/api/v1/chat", json=payload)
-    second = client.post("/api/v1/chat", json=payload)
-
-    assert first.status_code == 200
-    assert first.json()["cached"] is False
-    assert second.status_code == 200
-    assert second.json()["cached"] is True
+    assert response.status_code == 422
 
 
 def test_deployment_exposes_public_chat_without_auth(client, app, monkeypatch):
@@ -425,7 +397,7 @@ def test_deployment_executes_immutable_pipeline_version(client, app, monkeypatch
 
     updated = client.patch(
         f"/api/v1/pipelines/{pipeline['id']}",
-        json={"strategy": "cag", "model": "changed-draft-model"},
+        json={"model": "changed-draft-model"},
     )
     assert updated.status_code == 200
     response = client.post("/api/v1/public/immutable-preview/chat", json={"message": "Atlas란?"})
@@ -499,7 +471,7 @@ def test_rollback_creates_deployable_immutable_head(client):
     pipeline = create_pipeline(client, "rag")
     client.patch(
         f"/api/v1/pipelines/{pipeline['id']}",
-        json={"strategy": "cag"},
+        json={"model": "changed-draft-model"},
     )
     saved = client.post(f"/api/v1/pipelines/{pipeline['id']}/versions")
     assert saved.status_code == 201

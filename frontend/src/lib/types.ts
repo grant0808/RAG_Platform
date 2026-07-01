@@ -6,7 +6,7 @@ export type ViewName =
   | "playground"
   | "deployments";
 
-export type Strategy = "rag" | "tag" | "cag";
+export type Strategy = "rag";
 export type ProviderName = "openai" | "anthropic" | "ollama";
 export type DeploymentEnvironment = "preview" | "production";
 export type DeploymentStatus = "running" | "stopped";

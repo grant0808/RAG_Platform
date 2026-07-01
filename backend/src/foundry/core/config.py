@@ -28,7 +28,6 @@ class Settings(BaseSettings):
     openai_chat_model: str = "gpt-4o-mini"
     ollama_base_url: str = "http://localhost:11434"
     ollama_chat_model: str = "llama3.1"
-    redis_url: str = "redis://localhost:6379/0"
     master_key_path: Path = Path(".data/master.key")
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000", "http://localhost:4173"]
@@ -37,7 +36,6 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 20 * 1024 * 1024
     chunk_size: int = 900
     chunk_overlap: int = 120
-    cache_ttl_seconds: int = 300
     fake_llm_enabled: bool = False
     fallback_to_local_model_on_provider_quota: bool = True
     chat_session_token_budget: int = 100_000

@@ -12,7 +12,6 @@ from foundry.services.pipelines import PipelineService
 from foundry.services.provider_quota import ProviderQuotaService
 from foundry.services.providers import ProviderClient, ProviderService
 from foundry.services.sources import SourceService
-from foundry.services.tables import TableStore
 
 
 @dataclass
@@ -26,7 +25,6 @@ class Container:
     pipelines: PipelineService
     sources: SourceService
     orchestrator: Orchestrator
-    tables: TableStore
 
     @classmethod
     def build(cls, settings: Settings) -> "Container":
@@ -41,10 +39,9 @@ class Container:
         providers = ProviderService(cipher, provider_client, settings)
         conversations = ConversationService()
         knowledge = KnowledgeIndex(settings)
-        tables = TableStore(settings.data_dir / "tables.duckdb")
-        sources = SourceService(settings, knowledge, tables)
+        sources = SourceService(settings, knowledge)
         pipelines = PipelineService(providers)
-        orchestrator = Orchestrator(settings, providers, knowledge, tables)
+        orchestrator = Orchestrator(settings, providers, knowledge)
         return cls(
             settings=settings,
             database=database,
@@ -55,7 +52,6 @@ class Container:
             pipelines=pipelines,
             sources=sources,
             orchestrator=orchestrator,
-            tables=tables,
         )
 
     async def startup(self) -> None:
@@ -73,5 +69,4 @@ class Container:
             await self.sources.rebuild(session)
 
     async def shutdown(self) -> None:
-        self.tables.close()
         await self.database.dispose()

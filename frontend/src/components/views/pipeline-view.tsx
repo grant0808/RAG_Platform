@@ -58,7 +58,7 @@ export function PipelineView({
           description="Provider를 연결하고 실행 가능한 첫 pipeline을 생성하세요."
         />
         <EmptyState title="선택된 pipeline이 없습니다.">
-          + New pipeline 버튼으로 RAG, TAG, CAG 설정을 시작하세요.
+          + New pipeline 버튼으로 RAG 설정을 시작하세요.
         </EmptyState>
       </section>
     );
@@ -194,14 +194,14 @@ export function PipelineView({
             <FlowNode
               index="01"
               icon="IN"
-              title={draft.strategy === "tag" ? "Table catalog" : "Knowledge index"}
-              detail={draft.strategy === "tag" ? "DuckDB schema" : `${snapshot.sources.length} sources`}
+              title="Knowledge index"
+              detail={`${snapshot.sources.length} sources`}
             />
             <FlowNode
               index="02"
-              icon={draft.strategy[0].toUpperCase()}
-              title={`${draft.strategy.toUpperCase()} Runnable`}
-              detail={draft.strategy === "rag" ? "Vector retriever" : draft.strategy === "tag" ? "Safe SQL tool" : "Cache + RAG"}
+              icon="R"
+              title="RAG Runnable"
+              detail="Vector retriever"
               accent
             />
             <FlowNode index="03" icon="LLM" title="Chat model" detail={`${draft.provider} / ${draft.model}`} />
@@ -224,8 +224,6 @@ export function PipelineView({
               <span>Strategy</span>
               <select value={draft.strategy} onChange={(event) => update("strategy", event.target.value as Strategy)}>
                 <option value="rag">RAG / 문서 검색</option>
-                <option value="tag">TAG / 테이블 질의</option>
-                <option value="cag">CAG / cache fallback</option>
               </select>
             </label>
             <div className="field-pair">

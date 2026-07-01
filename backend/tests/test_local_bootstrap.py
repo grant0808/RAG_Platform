@@ -57,8 +57,8 @@ async def test_bootstrap_is_idempotent_and_supports_local_chat(tmp_path):
 
     with TestClient(create_app(settings)) as client:
         assert len(client.get("/api/v1/providers").json()) == 1
-        assert len(client.get("/api/v1/sources").json()) == 2
-        assert len(client.get("/api/v1/pipelines").json()) == 3
+        assert len(client.get("/api/v1/sources").json()) == 1
+        assert len(client.get("/api/v1/pipelines").json()) == 1
 
         response = client.post(
             "/api/v1/public/local-rag-preview/chat",

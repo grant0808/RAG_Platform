@@ -287,8 +287,6 @@ export function PlaygroundView({
           <span>STRATEGY OVERRIDE</span>
           <select value={strategy} onChange={(event) => setStrategy(event.target.value as Strategy)}>
             <option value="rag">RAG</option>
-            <option value="tag">TAG</option>
-            <option value="cag">CAG</option>
           </select>
         </label>
         <div>
@@ -361,7 +359,7 @@ export function PlaygroundView({
           </header>
           <div className="trace-list">
             {traces.length === 0 ? (
-              <p>질문을 실행하면 retriever, tool, cache, model 단계가 표시됩니다.</p>
+              <p>질문을 실행하면 retriever와 model 단계가 표시됩니다.</p>
             ) : (
               traces.map((trace, index) => (
                 <div key={`${trace.step}-${index}`}>
@@ -381,8 +379,8 @@ export function PlaygroundView({
               <b>{lastResult?.strategy.toUpperCase() ?? strategy.toUpperCase()}</b>
             </div>
             <div>
-              <span>CACHED</span>
-              <b>{lastResult?.cached ? "HIT" : "MISS"}</b>
+              <span>MODEL</span>
+              <b>{lastResult?.model ?? pipeline.model}</b>
             </div>
             <div>
               <span>TOKENS</span>

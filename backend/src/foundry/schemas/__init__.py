@@ -1,5 +1,4 @@
 from foundry.schemas.base import Citation, OrmModel, TraceEvent
-from foundry.schemas.cag import CacheCreateRequest, CacheEntryResponse
 from foundry.schemas.chat import ChatRequest, ChatResponse, PublicChatRequest
 from foundry.schemas.conversation import (
     ChatMessageResponse,
@@ -47,8 +46,6 @@ __all__ = [
     "ProviderResponse",
     "SourceResponse",
     "HealthResponse",
-    "CacheCreateRequest",
-    "CacheEntryResponse",
     "EvaluationMetric",
     "EvaluationResultResponse",
     "EvaluationRunRequest",

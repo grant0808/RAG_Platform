@@ -8,7 +8,7 @@ PRD, API 명세, 인터랙티브 목업과 와이어프레임을 실제 FastAPI 
 - Source 파일 업로드·삭제
 - OpenAI·Anthropic API 키 연결·모델 갱신·해제
 - Pipeline 생성·Draft 수정·Version 저장·Rollback
-- RAG·TAG·CAG SSE Playground와 LangChain trace
+- RAG SSE Playground와 LangChain trace
 - 기본 평가 실행
 - Preview·Production Deployment 생성과 endpoint 복사
 

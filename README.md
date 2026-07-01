@@ -18,7 +18,7 @@ Backend terminal:
 cd backend
 cp .env.example .env
 # Add FOUNDRY_OPENAI_API_KEY or FOUNDRY_OPENAI_EMBEDDING_API_KEY to backend/.env.
-docker compose up -d postgres redis
+docker compose up -d postgres
 uv sync
 uv run foundry-local bootstrap
 uv run uvicorn foundry.main:app --reload

@@ -1,6 +1,4 @@
 import asyncio
-import json
-import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -10,10 +8,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableLambda
-from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from foundry.core.config import Settings
 from foundry.core.errors import ConfigurationError, ValidationError
@@ -22,14 +17,6 @@ from foundry.schemas import Citation, TraceEvent
 from foundry.services.knowledge import KnowledgeIndex, SearchResult
 from foundry.services.local_model import LocalFakeChatModel
 from foundry.services.providers import ProviderService
-from foundry.services.tables import TableStore
-
-CODE_FENCE_PATTERN = re.compile(r"```(?:sql)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
-
-
-class SqlToolInput(BaseModel):
-    sql: str = Field(description="One read-only DuckDB SELECT query")
-    allowed_tables: list[str] = Field(description="Exact table names this query may access")
 
 
 @dataclass
@@ -37,14 +24,6 @@ class PreparedContext:
     context: str
     citations: list[Citation] = field(default_factory=list)
     trace: list[TraceEvent] = field(default_factory=list)
-    cached_answer: str | None = None
-    cache_key: str | None = None
-
-
-@dataclass
-class CacheEntry:
-    answer: str
-    expires_at: float
 
 
 class Orchestrator:
@@ -53,39 +32,20 @@ class Orchestrator:
         settings: Settings,
         providers: ProviderService,
         knowledge: KnowledgeIndex,
-        tables: TableStore,
     ) -> None:
         self.settings = settings
         self.providers = providers
         self.knowledge = knowledge
-        self.tables = tables
-        self.cache: dict[str, CacheEntry] = {}
-        self.sql_tool = StructuredTool.from_function(
-            name="safe_duckdb_query",
-            description="Execute one validated read-only SELECT query against uploaded tables.",
-            func=self._execute_sql,
-            args_schema=SqlToolInput,
-        )
 
     async def invoke(
         self,
-        session: AsyncSession,
+        session: Any,
         pipeline: Pipeline,
         question: str,
         strategy: str,
         history: list[tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
         prepared = await self._prepare(session, pipeline, question, strategy)
-        if prepared.cached_answer is not None:
-            return self._result(
-                prepared.cached_answer,
-                pipeline,
-                strategy,
-                prepared,
-                usage={},
-                cached=True,
-            )
-
         messages = self._messages(pipeline, question, prepared.context, history or [])
         model = await self._model(session, pipeline)
         started = time.perf_counter()
@@ -115,8 +75,6 @@ class Orchestrator:
             )
         )
         answer = self._message_text(response)
-        if prepared.cache_key:
-            self._cache_set(prepared.cache_key, answer)
         return self._result(
             answer,
             pipeline,
@@ -128,7 +86,7 @@ class Orchestrator:
 
     async def stream(
         self,
-        session: AsyncSession,
+        session: Any,
         pipeline: Pipeline,
         question: str,
         strategy: str,
@@ -137,21 +95,6 @@ class Orchestrator:
         prepared = await self._prepare(session, pipeline, question, strategy)
         for trace in prepared.trace:
             yield {"type": "trace", "data": trace.model_dump(mode="json")}
-
-        if prepared.cached_answer is not None:
-            yield {"type": "token", "data": {"text": prepared.cached_answer}}
-            yield {
-                "type": "done",
-                "data": self._result(
-                    prepared.cached_answer,
-                    pipeline,
-                    strategy,
-                    prepared,
-                    usage={},
-                    cached=True,
-                ),
-            }
-            return
 
         messages = self._messages(pipeline, question, prepared.context, history or [])
         model = await self._model(session, pipeline)
@@ -197,8 +140,6 @@ class Orchestrator:
             )
         )
         answer = "".join(answer_parts)
-        if prepared.cache_key:
-            self._cache_set(prepared.cache_key, answer)
         for citation in prepared.citations:
             yield {"type": "citation", "data": citation.model_dump(mode="json")}
         yield {
@@ -215,20 +156,16 @@ class Orchestrator:
 
     async def _prepare(
         self,
-        session: AsyncSession,
+        session: Any,
         pipeline: Pipeline,
         question: str,
         strategy: str,
     ) -> PreparedContext:
-        if strategy not in {"rag", "tag", "cag"}:
+        if strategy != "rag":
             raise ValidationError(f"Unsupported strategy: {strategy}")
 
         async def prepare(_: dict[str, str]) -> PreparedContext:
-            if strategy == "rag":
-                return await self._prepare_rag(pipeline, question)
-            if strategy == "tag":
-                return await self._prepare_tag(session, pipeline, question)
-            return await self._prepare_cag(pipeline, question)
+            return await self._prepare_rag(pipeline, question)
 
         runnable = RunnableLambda(prepare, name=f"{strategy}_context_runnable")
         return await runnable.ainvoke({"question": question})
@@ -275,125 +212,7 @@ class Orchestrator:
             ],
         )
 
-    async def _prepare_tag(
-        self, session: AsyncSession, pipeline: Pipeline, question: str
-    ) -> PreparedContext:
-        from sqlalchemy import select
-
-        from foundry.models import Source
-
-        result = await session.execute(
-            select(Source).where(Source.table_name.is_not(None), Source.status == "ready")
-        )
-        sources = list(result.scalars())
-        if not sources:
-            raise ConfigurationError("TAG requires at least one CSV or XLSX source")
-
-        table_hits = await asyncio.to_thread(
-            self.knowledge.search,
-            question,
-            max(pipeline.top_k, len(sources)),
-            candidate_k=max(pipeline.top_k * 4, len(sources)),
-            kind="table",
-        )
-        ranked_source_ids = [str(hit.document.metadata.get("source_id")) for hit in table_hits]
-        source_by_id = {source.id: source for source in sources}
-        ranked_sources = [
-            source_by_id[source_id]
-            for source_id in ranked_source_ids
-            if source_id in source_by_id
-        ]
-        ranked_sources.extend(source for source in sources if source.id not in ranked_source_ids)
-        catalog_parts = [
-            await asyncio.to_thread(self.tables.catalog_text, source.table_name)
-            for source in ranked_sources[: max(1, pipeline.top_k)]
-            if source.table_name
-        ]
-        catalog = "\n\n".join(catalog_parts)
-        model = await self._model(session, pipeline)
-        sql_prompt = [
-            SystemMessage(
-                content=(
-                    "Generate exactly one DuckDB SELECT query. Use only the provided tables and "
-                    "columns. Never use INSERT, UPDATE, DELETE, CREATE, DROP, ATTACH, INSTALL, "
-                    "or LOAD. "
-                    "Return SQL only."
-                )
-            ),
-            HumanMessage(content=f"Catalog:\n{catalog}\n\nQuestion:\n{question}"),
-        ]
-        started = time.perf_counter()
-        sql_response: AIMessage = await model.ainvoke(sql_prompt)
-        sql = self._extract_sql(self._message_text(sql_response))
-        allowed_tables = {source.table_name for source in sources if source.table_name}
-        query_result = await asyncio.to_thread(
-            self.sql_tool.invoke,
-            {"sql": sql, "allowed_tables": sorted(allowed_tables)},
-        )
-        duration = self._duration_ms(started)
-        source_by_table = {source.table_name: source for source in sources}
-        cited = next(
-            (source for table, source in source_by_table.items() if table and table in sql),
-            sources[0],
-        )
-        return PreparedContext(
-            context=(
-                f"Executed SQL: {query_result['sql']}\n"
-                f"Columns: {json.dumps(query_result['columns'], ensure_ascii=False)}\n"
-                f"Rows: {json.dumps(query_result['rows'], ensure_ascii=False, default=str)}"
-            ),
-            citations=[
-                Citation(
-                    source_id=cited.id,
-                    source_name=cited.name,
-                    location=f"table:{cited.table_name}",
-                )
-            ],
-            trace=[
-                TraceEvent(
-                    step="safe_sql_tool",
-                    status="completed",
-                    duration_ms=duration,
-                    metadata={
-                        "sql": sql,
-                        "row_count": len(query_result["rows"]),
-                        "table_selection": "hybrid_catalog_retrieval",
-                    },
-                )
-            ],
-        )
-
-    async def _prepare_cag(self, pipeline: Pipeline, question: str) -> PreparedContext:
-        started = time.perf_counter()
-        key = f"{pipeline.id}:{pipeline.current_version}:{question.strip().lower()}"
-        entry = self.cache.get(key)
-        if entry and entry.expires_at > time.monotonic():
-            return PreparedContext(
-                context="Cached answer",
-                cached_answer=entry.answer,
-                trace=[
-                    TraceEvent(
-                        step="cache_retriever",
-                        status="completed",
-                        duration_ms=self._duration_ms(started),
-                        metadata={"hit": True},
-                    )
-                ],
-            )
-        rag = await self._prepare_rag(pipeline, question)
-        rag.cache_key = key
-        rag.trace.insert(
-            0,
-            TraceEvent(
-                step="cache_retriever",
-                status="completed",
-                duration_ms=self._duration_ms(started),
-                metadata={"hit": False, "fallback": "rag"},
-            ),
-        )
-        return rag
-
-    async def _model(self, session: AsyncSession, pipeline: Pipeline) -> Any:
+    async def _model(self, session: Any, pipeline: Pipeline) -> Any:
         api_key = await self.providers.get_api_key(session, pipeline.provider)
         if self.settings.fake_llm_enabled:
             return LocalFakeChatModel()
@@ -434,15 +253,6 @@ class Orchestrator:
     def _provider_error_summary(exc: Exception) -> str:
         value = " ".join(str(exc).split())
         return value[:500]
-
-    def _execute_sql(self, sql: str, allowed_tables: list[str]) -> dict[str, Any]:
-        return self.tables.execute_safe(sql, allowed_tables=set(allowed_tables))
-
-    def _cache_set(self, key: str, answer: str) -> None:
-        self.cache[key] = CacheEntry(
-            answer=answer,
-            expires_at=time.monotonic() + self.settings.cache_ttl_seconds,
-        )
 
     @staticmethod
     def _messages(
@@ -510,11 +320,6 @@ class Orchestrator:
             "fusion": round(hit.fusion_score, 4),
             "rerank": round(hit.rerank_score, 4),
         }
-
-    @staticmethod
-    def _extract_sql(value: str) -> str:
-        match = CODE_FENCE_PATTERN.search(value)
-        return (match.group(1) if match else value).strip().rstrip(";")
 
     @staticmethod
     def _message_text(message: Any) -> str:

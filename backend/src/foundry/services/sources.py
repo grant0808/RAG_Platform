@@ -18,9 +18,8 @@ from foundry.core.config import Settings
 from foundry.core.errors import ConfigurationError, NotFoundError, ValidationError
 from foundry.models import Source
 from foundry.services.knowledge import KnowledgeIndex
-from foundry.services.tables import TableStore, safe_identifier
 
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".json", ".html", ".pdf", ".csv", ".xlsx", ".xlsm"}
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".json", ".html", ".pdf"}
 PYPDF_LOGGERS = ("pypdf", "pypdf._reader", "pypdf.generic._image_inline")
 NO_TEXT_STATUS = "no_text"
 READY_STATUS = "ready"
@@ -31,11 +30,9 @@ class SourceService:
         self,
         settings: Settings,
         knowledge: KnowledgeIndex,
-        tables: TableStore,
     ) -> None:
         self.settings = settings
         self.knowledge = knowledge
-        self.tables = tables
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
@@ -66,14 +63,8 @@ class SourceService:
             source.path = str(path)
 
             documents: list[Document]
-            if suffix in {".csv", ".xlsx", ".xlsm"}:
-                source.table_name = f"source_{safe_identifier(source.id)}"
-                await asyncio.to_thread(self.tables.import_file, path, source.table_name)
-                content = await asyncio.to_thread(self.tables.catalog_text, source.table_name)
-                documents = [self._document(source, content, "table_catalog")]
-            else:
-                content = await asyncio.to_thread(self._extract_text, path, payload, suffix)
-                documents = self._split_documents(source, content, allow_empty=suffix == ".pdf")
+            content = await asyncio.to_thread(self._extract_text, path, payload, suffix)
+            documents = self._split_documents(source, content, allow_empty=suffix == ".pdf")
 
             source.chunk_count = self._index_documents(documents) if documents else 0
             source.status = READY_STATUS if documents else NO_TEXT_STATUS
@@ -122,19 +113,9 @@ class SourceService:
             if not await asyncio.to_thread(path.exists):
                 continue
             suffix = path.suffix.lower()
-            if source.table_name:
-                try:
-                    await asyncio.to_thread(self.tables.import_file, path, source.table_name)
-                    content = await asyncio.to_thread(self.tables.catalog_text, source.table_name)
-                    self.knowledge.add_documents([self._document(source, content, "table_catalog")])
-                except Exception:
-                    continue
-            else:
-                payload = await asyncio.to_thread(path.read_bytes)
-                content = await asyncio.to_thread(self._extract_text, path, payload, suffix)
-                self.knowledge.add_documents(
-                    self._split_documents(source, content, allow_empty=False)
-                )
+            payload = await asyncio.to_thread(path.read_bytes)
+            content = await asyncio.to_thread(self._extract_text, path, payload, suffix)
+            self.knowledge.add_documents(self._split_documents(source, content, allow_empty=False))
 
     def _split_documents(
         self,
@@ -194,13 +175,9 @@ class SourceService:
     def _kind_for(suffix: str) -> str:
         if suffix == ".pdf":
             return "pdf"
-        if suffix in {".csv", ".xlsx", ".xlsm"}:
-            return "table"
         return "document"
 
     async def _cleanup_failed_ingest(self, path: Path, table_name: str | None) -> None:
-        if table_name:
-            await asyncio.to_thread(self.tables.drop_table, table_name)
         if await asyncio.to_thread(path.exists):
             await asyncio.to_thread(path.unlink)
 

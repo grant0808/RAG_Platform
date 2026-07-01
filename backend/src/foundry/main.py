@@ -29,7 +29,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title=app_settings.app_name,
         version=__version__,
         description=(
-            "Authentication-free PoC API for LangChain RAG, TAG, CAG, provider keys, "
+            "Authentication-free PoC API for LangChain RAG, provider keys, "
             "pipeline versions, and deployments. Do not expose this PoC directly to the internet."
         ),
         lifespan=lifespan,
