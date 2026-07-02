@@ -17,13 +17,17 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     data_dir: Path = Path(".data")
     database_url: str = "sqlite+aiosqlite:///./.data/foundry.db"
-    vector_store_provider: str = "postgres"
+    vector_store_provider: str = "chroma"
     vector_database_url: str = "postgresql+psycopg://foundry:foundry@localhost:5432/foundry"
     vector_collection_name: str = "foundry_documents"
+    chroma_persist_dir: Path = Path(".data/chroma")
     embedding_provider: str = "huggingface"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_api_key: SecretStr | None = None
     huggingface_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    pdf_parser: str = "docling"
+    docling_chunker_max_tokens: int = 512
+    docling_chunker_merge_peers: bool = True
     openai_api_key: SecretStr | None = None
     openai_chat_model: str = "gpt-4o-mini"
     ollama_base_url: str = "http://localhost:11434"
@@ -45,6 +49,7 @@ class Settings(BaseSettings):
     def prepare_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "uploads").mkdir(parents=True, exist_ok=True)
+        self.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
         self.master_key_path.parent.mkdir(parents=True, exist_ok=True)
 
 

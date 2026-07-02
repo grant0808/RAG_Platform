@@ -9,7 +9,7 @@ LangChain으로 RAG를 학습하기 위한 인증 없는 FastAPI PoC입니다.
 - OpenAI·Anthropic API 키와 local Ollama base URL 연결, 마스킹, 모델 목록 동기화
 - TXT, Markdown, JSON, HTML, PDF 업로드
 - LangChain Runnable 기반 RAG
-- Hugging Face/OpenAI/local embedding과 PostgreSQL+pgvector 또는 memory vector store 기반 RAG
+- Docling 기반 PDF 논문 파싱, Hugging Face/OpenAI/local embedding, Chroma/PostgreSQL/memory vector store 기반 RAG
 - 파이프라인 설정, 버전 저장, rollback
 - Preview·Production deployment slug
 - 일반 JSON 채팅과 SSE streaming
@@ -26,7 +26,7 @@ uv run foundry-local bootstrap
 uv run uvicorn foundry.main:app --reload
 ```
 
-기본 설정은 Hugging Face embedding과 PostgreSQL+pgvector vector store를 사용합니다.
+기본 설정은 Docling PDF parser, Hugging Face embedding, Chroma persistent vector store를 사용합니다.
 `bootstrap`은 애플리케이션 데이터베이스 스키마와 로컬 테스트 데이터를 멱등하게 생성합니다.
 
 - Provider: 검증을 생략한 로컬 OpenAI 연결 (`실제 키 아님`)
@@ -34,9 +34,9 @@ uv run uvicorn foundry.main:app --reload
 - Pipeline: RAG 데모 1개
 - Deployment: `local-rag-preview`
 - 기본 DB: `postgresql+asyncpg://foundry:foundry@localhost:5432/foundry`
-- 기본 vector store: `postgresql+psycopg://foundry:foundry@localhost:5432/foundry`, collection `foundry_documents`
+- 기본 vector store: Chroma persistent store `.data/chroma`, collection `foundry_documents`
 
-`.env.example`의 `FOUNDRY_FAKE_LLM_ENABLED=false`는 실제 provider chat 호출을 사용합니다. 기본 embedding은 `FOUNDRY_EMBEDDING_PROVIDER=huggingface`, `FOUNDRY_HUGGINGFACE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2`입니다. OpenAI embedding을 사용하려면 `FOUNDRY_EMBEDDING_PROVIDER=openai`로 바꾸고 `FOUNDRY_OPENAI_EMBEDDING_API_KEY`, `FOUNDRY_OPENAI_ADMIN_API_KEY`, 또는 `OPENAI_API_KEY` 중 하나를 설정합니다.
+`.env.example`의 `FOUNDRY_FAKE_LLM_ENABLED=false`는 실제 provider chat 호출을 사용합니다. 기본 PDF parser는 `FOUNDRY_PDF_PARSER=docling`, 기본 embedding은 `FOUNDRY_EMBEDDING_PROVIDER=huggingface`, `FOUNDRY_HUGGINGFACE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2`입니다. OpenAI embedding을 사용하려면 `FOUNDRY_EMBEDDING_PROVIDER=openai`로 바꾸고 `FOUNDRY_OPENAI_EMBEDDING_API_KEY`, `FOUNDRY_OPENAI_ADMIN_API_KEY`, 또는 `OPENAI_API_KEY` 중 하나를 설정합니다.
 
 Ollama를 로컬 모델 provider로 사용하려면 Ollama를 먼저 실행하고 모델을 내려받습니다.
 
@@ -138,12 +138,12 @@ uv run ruff check src tests
 ```
 
 테스트는 외부 Provider 호출을 fake model로 대체하며 API 키 원문 비노출, RAG citation, deployment endpoint를 검증합니다.
-테스트 fixture는 `vector_store_provider="memory"`와 `embedding_provider="local"`을 명시해 Hugging Face/OpenAI embedding API와 로컬 PostgreSQL/pgvector에 의존하지 않습니다.
+테스트 fixture는 `vector_store_provider="memory"`, `embedding_provider="local"`, `pdf_parser="pypdf"`를 명시해 Hugging Face/OpenAI embedding API, Docling 모델 로딩, 로컬 Chroma/PostgreSQL에 의존하지 않습니다.
 
 ## PoC 제약
 
 - 인증·RBAC·tenant 격리를 의도적으로 제외했습니다.
 - 테스트용 로컬 hash embedding은 학습 편의를 위한 구현이며 의미 검색 품질 평가용이 아닙니다.
-- Source index는 프로세스 메모리에 있습니다.
+- Sparse Source index는 프로세스 메모리에 있고, dense vector index는 기본적으로 로컬 Chroma에 저장됩니다.
 - SQLite와 InMemoryVectorStore는 테스트와 빠른 로컬 smoke test 전용입니다.
 - GCE 배포 전 MinIO Adapter와 migration을 추가해야 합니다.

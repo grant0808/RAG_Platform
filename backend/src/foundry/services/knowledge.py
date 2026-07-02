@@ -81,10 +81,50 @@ class PostgresVectorDB:
             self.store.create_collection()
 
 
+class ChromaVectorDB:
+    def __init__(self, settings: Settings, embeddings: Embeddings) -> None:
+        try:
+            from langchain_chroma import Chroma
+        except ImportError as exc:
+            raise ConfigurationError(
+                "Chroma vector DB requires the langchain-chroma and chromadb packages. "
+                "Run `uv sync` after updating dependencies."
+            ) from exc
+
+        self.settings = settings
+        self.embeddings = embeddings
+        self._chroma_cls = Chroma
+        self.store = self._new_store()
+
+    def _new_store(self):
+        self.settings.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
+        return self._chroma_cls(
+            collection_name=self.settings.vector_collection_name,
+            embedding_function=self.embeddings,
+            persist_directory=str(self.settings.chroma_persist_dir),
+        )
+
+    def add_documents(self, documents: list[Document]) -> None:
+        self.store.add_documents(
+            documents,
+            ids=[str(document.metadata["knowledge_id"]) for document in documents],
+        )
+
+    def similarity_search_with_score(self, query: str, k: int) -> list[tuple[Document, float]]:
+        return self.store.similarity_search_with_score(query, k=k)
+
+    def reset(self) -> None:
+        try:
+            self.store.delete_collection()
+        except Exception:
+            pass
+        self.store = self._new_store()
+
+
 class KnowledgeIndex:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.vector_store: InMemoryVectorStore | PostgresVectorDB | None = None
+        self.vector_store: InMemoryVectorStore | PostgresVectorDB | ChromaVectorDB | None = None
         self.documents: list[Document] = []
         self.term_frequencies: list[Counter[str]] = []
         self.document_frequencies: Counter[str] = Counter()
@@ -93,7 +133,7 @@ class KnowledgeIndex:
         self._dense_index_unavailable = False
 
     def reset(self) -> None:
-        if isinstance(self.vector_store, PostgresVectorDB):
+        if isinstance(self.vector_store, PostgresVectorDB | ChromaVectorDB):
             self.vector_store.reset()
         elif self.vector_store is not None:
             self.vector_store = None
@@ -306,7 +346,7 @@ class KnowledgeIndex:
     def _dense_score(raw_score: float) -> float:
         return 1 / (1 + max(float(raw_score), 0.0))
 
-    def _vector_store(self) -> InMemoryVectorStore | PostgresVectorDB | None:
+    def _vector_store(self) -> InMemoryVectorStore | PostgresVectorDB | ChromaVectorDB | None:
         if self._dense_index_unavailable:
             return None
         if self.vector_store is not None:
@@ -356,13 +396,17 @@ class KnowledgeIndex:
             chunk_size=1000,
         )
 
-    def _build_vector_store(self, embeddings: Embeddings) -> InMemoryVectorStore | PostgresVectorDB:
+    def _build_vector_store(
+        self, embeddings: Embeddings
+    ) -> InMemoryVectorStore | PostgresVectorDB | ChromaVectorDB:
         if self.settings.vector_store_provider == "memory":
             return InMemoryVectorStore(embeddings)
+        if self.settings.vector_store_provider == "chroma":
+            return ChromaVectorDB(self.settings, embeddings)
         if self.settings.vector_store_provider != "postgres":
             raise ConfigurationError(
                 f"Unsupported vector store provider: {self.settings.vector_store_provider}. "
-                "Supported values: 'postgres', 'memory'."
+                "Supported values: 'chroma', 'postgres', 'memory'."
             )
         return PostgresVectorDB(self.settings, embeddings)
 

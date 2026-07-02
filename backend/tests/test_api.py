@@ -1,11 +1,15 @@
+import sys
 from io import BytesIO
+from types import ModuleType, SimpleNamespace
 
 from fastapi.testclient import TestClient
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, AIMessageChunk
 from pypdf import PdfWriter
 
 from foundry.core.config import Settings
 from foundry.main import create_app
+from foundry.services.knowledge import KnowledgeIndex, LocalHashEmbeddings
 
 PDF_WITH_TEXT = (
     b"%PDF-1.4\n"
@@ -151,6 +155,7 @@ def test_startup_rewrites_invalid_openai_pipeline_models(tmp_path):
         "database_url": database_url,
         "vector_store_provider": "memory",
         "embedding_provider": "local",
+        "pdf_parser": "pypdf",
         "openai_api_key": None,
         "openai_embedding_api_key": None,
         "openai_admin_api_key": None,
@@ -254,6 +259,80 @@ def test_pdf_upload_succeeds(client):
     assert body["chunk_count"] >= 1
 
 
+def test_pdf_upload_uses_docling_metadata_when_available(client, app, monkeypatch):
+    app.state.container.settings.pdf_parser = "docling"
+
+    class FakeDoclingDocument:
+        name = "Attention Is All You Need"
+        pages = {1: object(), 2: object()}
+
+        def export_to_markdown(self):
+            return (
+                "# Attention Is All You Need\n\n"
+                "## Abstract\n\n"
+                "Transformer attention improves sequence modeling for AI systems."
+            )
+
+    class FakeDocumentConverter:
+        def convert(self, source):
+            assert source.suffix == ".pdf"
+            return SimpleNamespace(document=FakeDoclingDocument())
+
+    class FakeChunker:
+        def __init__(self, **_kwargs):
+            pass
+
+        def chunk(self, dl_doc):
+            assert dl_doc.name == "Attention Is All You Need"
+            provenance = SimpleNamespace(page_no=1)
+            doc_item = SimpleNamespace(label="paragraph", prov=[provenance])
+            meta = SimpleNamespace(
+                headings=["Attention Is All You Need", "Abstract"],
+                captions=[],
+                doc_items=[doc_item],
+            )
+            yield SimpleNamespace(
+                text="Transformer attention improves sequence modeling for AI systems.",
+                meta=meta,
+            )
+
+        def contextualize(self, chunk):
+            return f"Attention Is All You Need\nAbstract\n{chunk.text}"
+
+    docling_module = ModuleType("docling")
+    chunking_module = ModuleType("docling.chunking")
+    chunking_module.HybridChunker = FakeChunker
+    converter_module = ModuleType("docling.document_converter")
+    converter_module.DocumentConverter = FakeDocumentConverter
+    monkeypatch.setitem(sys.modules, "docling", docling_module)
+    monkeypatch.setitem(sys.modules, "docling.chunking", chunking_module)
+    monkeypatch.setitem(sys.modules, "docling.document_converter", converter_module)
+    monkeypatch.setattr(
+        app.state.container.sources,
+        "_docling_chunker",
+        lambda hybrid_chunker_cls: hybrid_chunker_cls(),
+    )
+
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("attention.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["chunk_count"] >= 1
+    indexed = app.state.container.sources.knowledge.documents[0]
+    assert indexed.metadata["parser"] == "docling"
+    assert indexed.metadata["document_type"] == "ai_computer_science_paper"
+    assert indexed.metadata["normalized_format"] == "markdown"
+    assert indexed.metadata["title"] == "Attention Is All You Need"
+    assert indexed.metadata["page_count"] == 2
+    assert indexed.metadata["section_path"] == "Attention Is All You Need > Abstract"
+    assert indexed.metadata["page_start"] == 1
+    assert indexed.metadata["docling_labels"] == "paragraph"
+    assert "Transformer attention" in indexed.metadata["original_text"]
+
+
 def test_valid_pdf_without_extractable_text_is_saved_as_no_text_source(client):
     buffer = BytesIO()
     writer = PdfWriter()
@@ -279,6 +358,7 @@ def test_upload_uses_sparse_index_when_openai_embedding_key_is_missing(tmp_path)
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         vector_store_provider="postgres",
         embedding_provider="openai",
+        pdf_parser="pypdf",
         openai_api_key=None,
         openai_embedding_api_key=None,
         openai_admin_api_key=None,
@@ -333,6 +413,47 @@ def test_pdf_upload_succeeds_when_dense_index_is_unavailable(client, app, monkey
     assert response.status_code == 201
     assert response.json()["chunk_count"] >= 1
     assert knowledge.search("Hello PDF upload", top_k=1)
+
+
+def test_chroma_vector_store_indexes_documents_without_external_service(tmp_path, monkeypatch):
+    class FakeChroma:
+        def __init__(self, collection_name, embedding_function, persist_directory):
+            self.collection_name = collection_name
+            self.embedding_function = embedding_function
+            self.persist_directory = persist_directory
+            self.documents = []
+            self.deleted = False
+
+        def add_documents(self, documents, ids):
+            self.documents.extend(zip(ids, documents, strict=True))
+
+        def similarity_search_with_score(self, _query, k):
+            return [(document, 0.0) for _id, document in self.documents[:k]]
+
+        def delete_collection(self):
+            self.deleted = True
+
+    chroma_module = ModuleType("langchain_chroma")
+    chroma_module.Chroma = FakeChroma
+    monkeypatch.setitem(sys.modules, "langchain_chroma", chroma_module)
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        chroma_persist_dir=tmp_path / "chroma",
+        vector_store_provider="chroma",
+        embedding_provider="local",
+    )
+    knowledge = KnowledgeIndex(settings)
+    vector_store = knowledge._build_vector_store(LocalHashEmbeddings())
+
+    vector_store.add_documents(
+        [Document(page_content="graph neural networks", metadata={"knowledge_id": "paper-1"})]
+    )
+
+    assert vector_store.store.collection_name == "foundry_documents"
+    assert vector_store.store.persist_directory == str(tmp_path / "chroma")
+    assert vector_store.similarity_search_with_score("neural", k=1)[0][0].page_content.startswith(
+        "graph"
+    )
 
 
 def test_table_upload_is_no_longer_supported(client):

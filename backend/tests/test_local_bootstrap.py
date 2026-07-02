@@ -12,6 +12,7 @@ def local_settings(tmp_path) -> Settings:
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'local.db'}",
         vector_store_provider="memory",
         embedding_provider="local",
+        pdf_parser="pypdf",
         openai_api_key=None,
         openai_embedding_api_key=None,
         openai_admin_api_key=None,
