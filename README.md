@@ -34,7 +34,7 @@ npm run dev
 
 Open <http://localhost:3000>. The frontend uses `frontend/.env.local` and points to `http://localhost:8000/api/v1` by default.
 
-For a local Ollama-backed RAG run, keep `backend/.env` on `FOUNDRY_EMBEDDING_PROVIDER=huggingface`, run Ollama locally, and register the Ollama provider in the UI with `http://localhost:11434`. For an OpenAI-backed run, switch `FOUNDRY_EMBEDDING_PROVIDER=openai` and register the OpenAI provider. For a key-free smoke run, switch backend `.env` to `FOUNDRY_FAKE_LLM_ENABLED=true`, `FOUNDRY_EMBEDDING_PROVIDER=local`, `FOUNDRY_VECTOR_STORE_PROVIDER=memory`, and `FOUNDRY_DATABASE_URL=sqlite+aiosqlite:///./.data/foundry.db`.
+For a local Ollama-backed RAG run, keep `backend/.env` on `FOUNDRY_EMBEDDING_PROVIDER=huggingface`, `FOUNDRY_VECTOR_STORE_PROVIDER=chroma`, and `FOUNDRY_PDF_PARSER=docling`, run Ollama locally, and register the Ollama provider in the UI with `http://localhost:11434`. For an OpenAI-backed run, switch `FOUNDRY_EMBEDDING_PROVIDER=openai` and register the OpenAI provider. For a key-free smoke run, switch backend `.env` to `FOUNDRY_FAKE_LLM_ENABLED=true`, `FOUNDRY_EMBEDDING_PROVIDER=local`, `FOUNDRY_VECTOR_STORE_PROVIDER=memory`, `FOUNDRY_PDF_PARSER=pypdf`, and `FOUNDRY_DATABASE_URL=sqlite+aiosqlite:///./.data/foundry.db`.
 
 Validation:
 
