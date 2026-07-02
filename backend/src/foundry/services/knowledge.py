@@ -168,7 +168,7 @@ class KnowledgeIndex:
         kind: str | None = None,
     ) -> list[SearchResult]:
         if not self.documents:
-            return []
+            return self._dense_only_search(query, top_k, kind=kind)
 
         candidate_count = min(len(self.documents), candidate_k or max(top_k * 4, top_k))
         try:
@@ -240,6 +240,42 @@ class KnowledgeIndex:
             )
 
         return sorted(results, key=lambda result: result.score, reverse=True)[:top_k]
+
+    def _dense_only_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        kind: str | None,
+    ) -> list[SearchResult]:
+        try:
+            vector_store = self._vector_store()
+            dense_hits = (
+                vector_store.similarity_search_with_score(query, k=top_k)
+                if vector_store is not None
+                else []
+            )
+        except Exception:
+            logger.info("Dense vector search unavailable; using sparse index")
+            self.vector_store = None
+            self._dense_index_unavailable = True
+            return []
+
+        results: list[SearchResult] = []
+        for document, raw_score in dense_hits:
+            if kind and not self._matches_kind(document, kind):
+                continue
+            dense_score = self._dense_score(raw_score)
+            results.append(
+                SearchResult(
+                    document=document,
+                    score=dense_score,
+                    dense_score=dense_score,
+                    fusion_score=dense_score,
+                    rerank_score=dense_score,
+                )
+            )
+        return results[:top_k]
 
     def _rebuild_sparse_index(self) -> None:
         self.term_frequencies = []

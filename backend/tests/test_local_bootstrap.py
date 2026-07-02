@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from langchain_core.documents import Document
 
 from foundry.cli import bootstrap_local, initialize_database
 from foundry.core.config import Settings
@@ -37,6 +38,30 @@ def test_empty_embedding_key_falls_back_to_admin_key(monkeypatch):
     )
 
     assert KnowledgeIndex(settings)._configured_openai_api_key() == "admin-test-key"
+
+
+def test_search_can_use_persistent_dense_index_without_startup_rebuild(tmp_path):
+    settings = local_settings(tmp_path)
+    index = KnowledgeIndex(settings)
+
+    class DenseStore:
+        def similarity_search_with_score(self, _query, k):
+            return [
+                (
+                    Document(
+                        page_content="Persisted dense document",
+                        metadata={"knowledge_id": "persisted-1", "source_kind": "document"},
+                    ),
+                    0.25,
+                )
+            ][:k]
+
+    index.vector_store = DenseStore()
+
+    results = index.search("persisted", top_k=3)
+
+    assert len(results) == 1
+    assert results[0].document.metadata["knowledge_id"] == "persisted-1"
 
 
 async def test_initialize_database_creates_sqlite_schema(tmp_path):

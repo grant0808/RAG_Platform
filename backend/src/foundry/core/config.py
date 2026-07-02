@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     openai_embedding_api_key: SecretStr | None = None
     huggingface_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     pdf_parser: str = "docling"
+    rebuild_index_on_startup: bool = True
     docling_chunker_max_tokens: int = 512
     docling_chunker_merge_peers: bool = True
     openai_api_key: SecretStr | None = None

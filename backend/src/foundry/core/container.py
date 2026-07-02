@@ -66,7 +66,8 @@ class Container:
                     ),
                     {"model": self.settings.openai_chat_model},
                 )
-            await self.sources.rebuild(session)
+            if self.settings.rebuild_index_on_startup:
+                await self.sources.rebuild(session)
 
     async def shutdown(self) -> None:
         await self.database.dispose()

@@ -28,6 +28,8 @@ uv run uvicorn foundry.main:app --reload
 
 기본 설정은 Docling PDF parser, Hugging Face embedding, Chroma persistent vector store를 사용합니다.
 `bootstrap`은 애플리케이션 데이터베이스 스키마와 로컬 테스트 데이터를 멱등하게 생성합니다.
+로컬에서 이미 인덱싱된 Chroma 데이터를 재사용해 빠르게 띄우려면 `.env`에
+`FOUNDRY_REBUILD_INDEX_ON_STARTUP=false`를 설정합니다.
 
 - Provider: 검증을 생략한 로컬 OpenAI 연결 (`실제 키 아님`)
 - Source: RAG 문서 1개
