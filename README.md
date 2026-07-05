@@ -8,7 +8,7 @@
 - [Backend PoC](./backend/README.md)
 - [Frontend application](./frontend/README.md)
 - [API specification](./API_SPEC.md)
-- [ERD](./ERD.md)
+- [ERD](https://dbdiagram.io/d/RAG-6a4a765e4ac62e474c31c8d5)
 
 ## Quick start
 
