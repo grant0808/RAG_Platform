@@ -17,13 +17,13 @@
 
 ## AI/RAG
 
-- Embeddings: Hugging Face, OpenAI, local hash embedding
-- Vector store: PostgreSQL + pgvector 또는 in-memory
+- Embeddings: Hugging Face
+- Vector store: Chroma
 - Providers: OpenAI, Anthropic, Ollama
 
 ## Storage
 
-- Metadata DB: PostgreSQL 또는 SQLite
+- Metadata DB: PostgreSQL
 - Uploaded files: local filesystem
 - Credential encryption: local master key 기반 암호화
 
