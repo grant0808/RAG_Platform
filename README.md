@@ -1,13 +1,14 @@
 # RAG Platform
 
 - [Quick start](#quick-start)
-- [PRD](./PRD.md)
-- [Architecture](./ARCHITECTURE.md)
-- [Technology stack](./TECH_STACK.md)
+- [PRD](./docs/PRD.md)
+- [Requirements specification](./docs/REQUIREMENTS_SPEC.md)
+- [Architecture](./docs/ARCHITECTURE.md)
+- [Technology stack](./docs/TECH_STACK.md)
 - [Interactive mockup](./index.html)
 - [Backend PoC](./backend/README.md)
 - [Frontend application](./frontend/README.md)
-- [API specification](./API_SPEC.md)
+- [API specification](./docs/API_SPEC.md)
 - [ERD](https://dbdiagram.io/d/RAG-6a4a765e4ac62e474c31c8d5)
 
 ## Quick start

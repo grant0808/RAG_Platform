@@ -2,6 +2,14 @@
 
 Foundry는 컴퓨터/AI 관련 논문을 빠르게 탐색, 요약, 비교하고 근거 기반으로 질의응답하기 위한 개인용 RAG 기반 논문 정보 탐색 플랫폼이다. 기존의 문서 기반 RAG 파이프라인 구성, 평가, 버전 관리, 배포 기능을 유지하되, 논문 분석에 최적화된 PDF 처리, 멀티 LLM 연결, token 비용 최적화, RAGAS 기반 정량 평가 기능을 확장한다.
 
+## 코드 분석 기준 구현 상태
+
+이 PRD는 제품 목표와 확장 방향을 포함한다. 현재 코드 기준 상세 요구사항과 구현/추정/추가 제안 구분은 [요구사항 명세서](./REQUIREMENTS_SPEC.md)를 기준으로 한다.
+
+현재 구현된 핵심 기능은 인증 없는 로컬 PoC 형태의 Provider 연결, Source 업로드와 indexing, RAG pipeline draft/version/rollback, RAG chat/SSE streaming, citation/trace/usage 반환, chat session, 기본 evaluation, deployment/public chat, `/status` token/provider quota 조회다.
+
+현재 코드만으로 구현 완료로 볼 수 없는 기능은 사용자별 인증/권한, 정식 RAGAS metric 평가, 질문 난이도 기반 자동 모델 라우팅, 비용 최적화 추천, 논문 간 비교/실험 결과/한계점 추출 전용 기능이다. 해당 항목은 제품 목표 또는 추가 제안 기능으로 취급한다.
+
 ## 0. 3-Agent 팀 구성
 
 | Agent | 선정 이유 | PRD 중점 수정 영역 |
