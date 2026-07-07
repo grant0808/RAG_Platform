@@ -177,6 +177,45 @@ export interface EvaluationResult {
   }>;
 }
 
+export interface RagasDatasetItem {
+  question: string;
+  answer?: string | null;
+  contexts?: string[];
+  ground_truth: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RagasMetricScore {
+  question: string;
+  faithfulness: number;
+  answer_relevancy: number;
+  context_precision: number;
+  context_recall: number;
+  route: string;
+  latency_ms: number | null;
+}
+
+export interface RagasEvaluationResult {
+  id: string;
+  pipeline_id: string;
+  run_name: string;
+  executed_at: string;
+  result_path: string;
+  metrics: RagasMetricScore[];
+  averages: Record<string, number>;
+  config: Record<string, unknown>;
+  ragas_backend: string;
+}
+
+export interface RagasEvaluationSummary {
+  id: string;
+  run_name: string | null;
+  pipeline_id: string | null;
+  executed_at: string | null;
+  averages: Record<string, number>;
+  result_path: string;
+}
+
 export interface AppSnapshot {
   health: Health | null;
   providers: Provider[];

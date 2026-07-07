@@ -11,6 +11,9 @@ import type {
   Citation,
   EvaluationResult,
   Pipeline,
+  RagasDatasetItem,
+  RagasEvaluationResult,
+  RagasEvaluationSummary,
   SourceReference,
   Strategy,
   TraceEvent,
@@ -50,7 +53,10 @@ export function PlaygroundView({
   const [traces, setTraces] = useState<TraceEvent[]>([]);
   const [strategy, setStrategy] = useState<Strategy>(pipeline?.strategy ?? "rag");
   const [running, setRunning] = useState(false);
+  const [ragasRunning, setRagasRunning] = useState(false);
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
+  const [ragasResult, setRagasResult] = useState<RagasEvaluationResult | null>(null);
+  const [ragasRuns, setRagasRuns] = useState<RagasEvaluationSummary[]>([]);
 
   const loadSessions = useCallback(
     async (pipelineId: string) => {
@@ -63,6 +69,15 @@ export function PlaygroundView({
     [notify],
   );
 
+  const loadRagasRuns = useCallback(async () => {
+    try {
+      const runs = await api.listRagasEvaluations();
+      setRagasRuns(runs);
+    } catch {
+      setRagasRuns([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!pipeline) return;
     setStrategy(pipeline.strategy);
@@ -71,7 +86,8 @@ export function PlaygroundView({
     setMessages([EMPTY_MESSAGE]);
     setTraces([]);
     void loadSessions(pipeline.id);
-  }, [loadSessions, pipeline]);
+    void loadRagasRuns();
+  }, [loadRagasRuns, loadSessions, pipeline]);
 
   if (!pipeline) {
     return (
@@ -228,6 +244,25 @@ export function PlaygroundView({
     }
   }
 
+  async function runRagas() {
+    if (!pipeline) return;
+    setRagasRunning(true);
+    try {
+      const result = await api.runRagasEvaluation(
+        pipeline.id,
+        buildRagasDataset(lastResult),
+        `playground-${new Date().toISOString()}`,
+      );
+      setRagasResult(result);
+      await loadRagasRuns();
+      notify("RAGAS evaluation을 실행했습니다.");
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "RAGAS evaluation 실행에 실패했습니다.");
+    } finally {
+      setRagasRunning(false);
+    }
+  }
+
   function handleMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
@@ -243,9 +278,14 @@ export function PlaygroundView({
         outline="evidence."
         description="SSE token, citation, LangChain trace event를 하나의 runtime frame에서 확인합니다."
         action={
-          <button className="button" disabled={running} onClick={() => void evaluate()}>
-            Run evaluation
-          </button>
+          <div className="top-actions">
+            <button className="button" disabled={running} onClick={() => void evaluate()}>
+              Run evaluation
+            </button>
+            <button className="button acid" disabled={ragasRunning} onClick={() => void runRagas()}>
+              Run RAGAS
+            </button>
+          </div>
         }
       />
       <div className="playground-toolbar">
@@ -421,6 +461,42 @@ export function PlaygroundView({
               </dl>
             </div>
           )}
+          {ragasResult && (
+            <div className="evaluation-card ragas-card">
+              <span>RAGAS / {ragasResult.ragas_backend}</span>
+              <strong>{formatScore(ragasResult.averages.faithfulness)}</strong>
+              <dl>
+                <div>
+                  <dt>Answer relevancy</dt>
+                  <dd>{formatScore(ragasResult.averages.answer_relevancy)}</dd>
+                </div>
+                <div>
+                  <dt>Context precision</dt>
+                  <dd>{formatScore(ragasResult.averages.context_precision)}</dd>
+                </div>
+                <div>
+                  <dt>Context recall</dt>
+                  <dd>{formatScore(ragasResult.averages.context_recall)}</dd>
+                </div>
+              </dl>
+            </div>
+          )}
+          <div className="ragas-runs">
+            <span>RECENT RAGAS RUNS</span>
+            {ragasRuns.filter((run) => run.pipeline_id === pipeline.id).slice(0, 4).length === 0 ? (
+              <p>No RAGAS runs yet.</p>
+            ) : (
+              ragasRuns
+                .filter((run) => run.pipeline_id === pipeline.id)
+                .slice(0, 4)
+                .map((run) => (
+                  <div key={run.id}>
+                    <strong>{run.run_name ?? run.id.slice(0, 8)}</strong>
+                    <small>{formatScore(run.averages?.faithfulness)} faithfulness</small>
+                  </div>
+                ))
+            )}
+          </div>
         </aside>
       </div>
     </section>
@@ -429,6 +505,46 @@ export function PlaygroundView({
 
 function readSources(metadata: Record<string, unknown>): SourceReference[] {
   return Array.isArray(metadata.sources) ? (metadata.sources as SourceReference[]) : [];
+}
+
+function buildRagasDataset(lastResult: ChatResponse | undefined): RagasDatasetItem[] {
+  if (!lastResult?.query || !lastResult.answer) {
+    return [
+      {
+        question: "RAG pipeline smoke evaluation",
+        ground_truth: "The answer should be grounded in retrieved context and return sources.",
+        contexts: [],
+        metadata: { source: "playground-default" },
+      },
+    ];
+  }
+  return [
+    {
+      question: lastResult.query,
+      answer: lastResult.answer,
+      contexts: extractContextText(lastResult.contexts),
+      ground_truth: lastResult.answer,
+      metadata: {
+        route: lastResult.route,
+        selected_tool: lastResult.selected_tool,
+        source: "playground-last-response",
+      },
+    },
+  ];
+}
+
+function extractContextText(contexts: unknown[]): string[] {
+  return contexts
+    .map((context) => {
+      if (typeof context === "string") return context;
+      if (isRecord(context) && typeof context.content === "string") return context.content;
+      return "";
+    })
+    .filter(Boolean);
+}
+
+function formatScore(value: unknown): string {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "--";
 }
 
 function readResult(message: { message_metadata: Record<string, unknown> }): ChatResponse | undefined {
