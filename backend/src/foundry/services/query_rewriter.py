@@ -13,6 +13,8 @@ class QueryRewriteResult:
     keywords: list[str] = field(default_factory=list)
     english_query: str = ""
     search_intent: str = "general"
+    requires_history: bool = False
+    standalone_query: str = ""
 
 
 class QueryRewriter:
@@ -62,7 +64,28 @@ class QueryRewriter:
         "요약": "summary",
     }
 
-    def rewrite(self, query: str) -> QueryRewriteResult:
+    _history_markers = {
+        "그",
+        "그럼",
+        "그건",
+        "이것",
+        "그것",
+        "해당",
+        "앞서",
+        "위",
+        "there",
+        "that",
+        "this",
+        "it",
+        "they",
+        "then",
+    }
+
+    def rewrite(
+        self,
+        query: str,
+        history: list[tuple[str, str]] | None = None,
+    ) -> QueryRewriteResult:
         tokens = [token for token in TOKEN_PATTERN.findall(query) if token.strip()]
         lowered = [token.lower() for token in tokens]
         keywords = [
@@ -72,17 +95,23 @@ class QueryRewriter:
         ]
         keywords = list(dict.fromkeys(keywords))[:12]
         intent = self._intent(query, keywords)
-        english_terms = [self._english_hints.get(token, token) for token in keywords]
+        history_keywords = (
+            self._history_keywords(history or []) if self._requires_history(lowered) else []
+        )
+        merged_keywords = list(dict.fromkeys([*history_keywords, *keywords]))[:16]
+        english_terms = [self._english_hints.get(token, token) for token in merged_keywords]
         english_query = " ".join(dict.fromkeys(english_terms))
         if intent != "general" and intent not in english_query:
             english_query = f"{english_query} {intent}".strip()
-        rewritten_query = " ".join(keywords) or query.strip()
+        rewritten_query = " ".join(merged_keywords) or query.strip()
         return QueryRewriteResult(
             original_query=query,
             rewritten_query=rewritten_query,
             keywords=keywords,
             english_query=english_query or rewritten_query,
             search_intent=intent,
+            requires_history=bool(history_keywords),
+            standalone_query=rewritten_query,
         )
 
     def _intent(self, query: str, keywords: list[str]) -> str:
@@ -92,3 +121,21 @@ class QueryRewriter:
             if any(term in value or term in keyword_set for term in terms):
                 return intent
         return "general"
+
+    def _requires_history(self, lowered_tokens: list[str]) -> bool:
+        if not lowered_tokens:
+            return False
+        if len(lowered_tokens) <= 4:
+            return True
+        return any(token in self._history_markers for token in lowered_tokens)
+
+    def _history_keywords(self, history: list[tuple[str, str]]) -> list[str]:
+        values: list[str] = []
+        for role, content in history[-6:]:
+            if role != "user":
+                continue
+            for token in TOKEN_PATTERN.findall(content):
+                value = token.lower().strip()
+                if len(value) > 1 and value not in self._stopwords and not value.isdigit():
+                    values.append(value)
+        return list(dict.fromkeys(values))[:8]

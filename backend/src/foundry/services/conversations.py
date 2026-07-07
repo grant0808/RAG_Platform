@@ -95,9 +95,15 @@ class ConversationService:
         return list(result.scalars())
 
     async def history(
-        self, session: AsyncSession, session_id: str, limit: int = 12
+        self,
+        session: AsyncSession,
+        session_id: str,
+        limit: int = 12,
+        exclude_message_id: str | None = None,
     ) -> list[ConversationTurn]:
         messages = await self.list_messages(session, session_id)
+        if exclude_message_id is not None:
+            messages = [message for message in messages if message.id != exclude_message_id]
         return [
             ConversationTurn(role=message.role, content=message.content)
             for message in messages[-limit:]

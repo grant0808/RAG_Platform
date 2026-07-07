@@ -253,7 +253,7 @@ def test_general_question_skips_rag_route(client, app, monkeypatch):
     assert any(event["step"] == "rag_router" for event in body["trace"])
 
 
-def test_web_fallback_route_uses_dummy_provider(client, app, monkeypatch):
+def test_web_fallback_route_handles_disabled_provider(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)
     pipeline = create_pipeline(client, "rag")
@@ -266,8 +266,7 @@ def test_web_fallback_route_uses_dummy_provider(client, app, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["route"] == "web_fallback"
-    assert body["sources"][0]["type"] == "web"
-    assert body["sources"][0]["provider"] == "dummy"
+    assert body["sources"] == []
     assert any(event["step"] == "web_search" for event in body["trace"])
 
 
@@ -352,12 +351,12 @@ def test_langgraph_rag_route_uses_duckduckgo_fallback_when_context_missing(
     assert response.status_code == 200
     body = response.json()
     assert body["route"] == "web_fallback"
-    assert body["web_results"]
-    assert body["sources"][0]["type"] == "web"
+    assert body["web_results"] == []
+    assert body["sources"] == []
     assert any(event["step"] == "web_search_fallback" for event in body["trace"])
 
 
-def test_chat_uses_dummy_web_fallback_when_rag_context_is_missing(client, app, monkeypatch):
+def test_chat_uses_web_fallback_when_rag_context_is_missing(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)
     pipeline = create_pipeline(client, "rag")
@@ -370,8 +369,8 @@ def test_chat_uses_dummy_web_fallback_when_rag_context_is_missing(client, app, m
     assert response.status_code == 200
     body = response.json()
     assert body["route"] == "web_fallback"
-    assert body["sources"][0]["type"] == "web"
-    assert body["citations"][0]["provider"] == "dummy"
+    assert body["sources"] == []
+    assert body["citations"] == []
     assert any(event["step"] == "web_search" for event in body["trace"])
 
 
@@ -443,8 +442,8 @@ def test_langgraph_rag_query_falls_back_to_web_when_context_missing(client, app,
     assert response.status_code == 200
     body = response.json()
     assert body["route"] == "web_fallback"
-    assert body["sources"][0]["type"] == "web"
-    assert body["web_results"][0]["provider"] == "dummy"
+    assert body["sources"] == []
+    assert body["web_results"] == []
     assert any(event["step"] == "web_search_fallback" for event in body["trace"])
 
 
@@ -1104,6 +1103,38 @@ def test_stream_chat_persists_session_and_uses_history(client, app, monkeypatch)
         "user",
         "assistant",
     ]
+    assert messages[-1]["conversation_id"] == session_id
+    assert messages[-1]["route"] in {"general", "rag", "web_fallback"}
+
+
+def test_rag_query_accepts_conversation_id_and_reports_memory(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    first = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "query": "이 논문의 방법론을 설명해줘"},
+    )
+    assert first.status_code == 200
+    conversation_id = first.json()["conversation_id"]
+
+    second = client.post(
+        "/api/v1/rag/query",
+        json={
+            "pipeline_id": pipeline["id"],
+            "conversation_id": conversation_id,
+            "query": "그럼 한계점은 뭐야?",
+        },
+    )
+
+    assert second.status_code == 200
+    body = second.json()
+    assert body["conversation_id"] == conversation_id
+    assert body["message_id"]
+    assert body["memory_used"] is True
+    assert body["history_count"] >= 2
+    assert "방법론" in (body["rewritten_query"] or "")
 
 
 def test_chat_session_title_can_be_set_and_renamed(client):

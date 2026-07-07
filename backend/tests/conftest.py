@@ -18,7 +18,7 @@ def app(tmp_path):
         openai_api_key=None,
         openai_embedding_api_key=None,
         openai_admin_api_key=None,
-        web_fallback_provider="dummy",
+        web_fallback_provider="none",
         master_key_path=tmp_path / "master.key",
         cors_origins=["http://testserver"],
     )

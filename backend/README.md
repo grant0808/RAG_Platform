@@ -117,12 +117,20 @@ docker compose exec api uv run foundry-local bootstrap
 
 LangGraph workflow는 질문을 `general`, `rag`, `web_fallback` 중 하나로 분류한다. 업로드 문서/source 기반 질문만 query rewrite, retrieval tool 선택, BM25/Chroma/Hybrid 검색, BGE reranker wrapper, context grading을 실행한다. 검색 결과가 없거나 rerank 결과가 부족하면 `DuckDuckGoSearchRun` fallback을 사용한다.
 
-기본 fallback provider는 DuckDuckGo이며, 네트워크/패키지 문제 또는 테스트 환경에서는 dummy provider로 graceful fallback한다. Tavily를 보조 provider로 쓰려면 다음 값을 설정한다.
+기본 fallback provider는 DuckDuckGo이다. 테스트나 폐쇄망처럼 외부 검색을 끄려면 `FOUNDRY_WEB_FALLBACK_PROVIDER=none`을 사용하며, Tavily를 보조 provider로 쓰려면 다음 값을 설정한다.
 
 ```env
 FOUNDRY_WEB_FALLBACK_PROVIDER=duckduckgo
 FOUNDRY_WEB_SEARCH_PROVIDER=tavily
 FOUNDRY_TAVILY_API_KEY=...
+```
+
+대화 메모리는 `chat_sessions`와 `chat_messages`에 저장된다. `/chat`, `/chat/query`, `/rag/query`는 기존 `session_id/message`와 새 `conversation_id/query` 입력을 모두 받으며, 응답에는 `conversation_id`, `message_id`, `rewritten_query`, `memory_used`, `history_count`, `sources`가 포함된다.
+
+```env
+FOUNDRY_MEMORY_ENABLED=true
+FOUNDRY_MEMORY_WINDOW_SIZE=6
+FOUNDRY_MEMORY_SUMMARY_ENABLED=false
 ```
 
 RAGAS 호환 평가:

@@ -24,6 +24,8 @@ RouteName = Literal["general", "rag", "web_fallback"]
 
 class RagGraphState(TypedDict, total=False):
     query: str
+    conversation_id: str
+    history: list[tuple[str, str]]
     route: RouteName
     route_reason: str
     rewrite: QueryRewriteResult
@@ -38,6 +40,8 @@ class RagGraphState(TypedDict, total=False):
     sources: list[dict[str, Any]]
     trace: list[TraceEvent]
     answer_mode: str
+    memory_used: bool
+    history_count: int
 
 
 @dataclass
@@ -52,6 +56,8 @@ class GraphPreparedContext:
     rewritten_query: str | None = None
     selected_tool: str = "none"
     web_results: list[dict[str, Any]] = field(default_factory=list)
+    memory_used: bool = False
+    history_count: int = 0
 
 
 class LangGraphRagWorkflow:
@@ -75,9 +81,18 @@ class LangGraphRagWorkflow:
         self.query_rewriter = query_rewriter or QueryRewriter()
         self._compiled_graph = self._compile_graph()
 
-    async def prepare(self, pipeline: Pipeline, query: str) -> GraphPreparedContext:
+    async def prepare(
+        self,
+        pipeline: Pipeline,
+        query: str,
+        history: list[tuple[str, str]] | None = None,
+        conversation_id: str | None = None,
+    ) -> GraphPreparedContext:
+        trimmed_history = (history or [])[-self.settings.memory_window_size :]
         initial_state: RagGraphState = {
             "query": query,
+            "conversation_id": conversation_id or "",
+            "history": trimmed_history,
             "trace": [],
             "selected_tool": "none",
             "retrieved_documents": [],
@@ -85,6 +100,8 @@ class LangGraphRagWorkflow:
             "web_results": [],
             "sources": [],
             "citations": [],
+            "memory_used": self.settings.memory_enabled and bool(trimmed_history),
+            "history_count": len(trimmed_history) if self.settings.memory_enabled else 0,
         }
         state = await self._compiled_graph.ainvoke(
             {
@@ -108,7 +125,12 @@ class LangGraphRagWorkflow:
                 self._trace(
                     "analyze_query",
                     started,
-                    {"route": route, "reason": decision.reason},
+                    {
+                        "route": route,
+                        "reason": decision.reason,
+                        "memory_used": state.get("memory_used", False),
+                        "history_count": state.get("history_count", 0),
+                    },
                 ),
             ],
         }
@@ -135,7 +157,8 @@ class LangGraphRagWorkflow:
 
     def rewrite_query(self, state: RagGraphState) -> RagGraphState:
         started = time.perf_counter()
-        rewrite = self.query_rewriter.rewrite(state["query"])
+        history = state.get("history", []) if self.settings.memory_enabled else []
+        rewrite = self.query_rewriter.rewrite(state["query"], history=history)
         return {
             **state,
             "rewrite": rewrite,
@@ -150,6 +173,8 @@ class LangGraphRagWorkflow:
                         "english_query": rewrite.english_query,
                         "keywords": rewrite.keywords,
                         "search_intent": rewrite.search_intent,
+                        "requires_history": rewrite.requires_history,
+                        "history_count": state.get("history_count", 0),
                     },
                 ),
             ],
@@ -351,6 +376,8 @@ class LangGraphRagWorkflow:
                     metadata={
                         "route": state.get("route"),
                         "selected_tool": state.get("selected_tool", "none"),
+                        "memory_used": state.get("memory_used", False),
+                        "history_count": state.get("history_count", 0),
                         "created_at": datetime.now(UTC).isoformat(),
                     },
                 ),
@@ -438,6 +465,8 @@ class LangGraphRagWorkflow:
             rewritten_query=state.get("rewritten_query"),
             selected_tool=state.get("selected_tool", "none"),
             web_results=web_results,
+            memory_used=state.get("memory_used", False),
+            history_count=state.get("history_count", 0),
         )
 
     @staticmethod

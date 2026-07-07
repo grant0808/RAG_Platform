@@ -133,6 +133,24 @@ export const api = {
     request<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`),
   deleteChatSession: (sessionId: string) =>
     request<void>(`/chat/sessions/${sessionId}`, { method: "DELETE" }),
+  createConversation: (pipelineId: string, title?: string) =>
+    request<ChatSession>("/chat/sessions", {
+      method: "POST",
+      body: JSON.stringify({ pipeline_id: pipelineId, title: title || null }),
+    }),
+  getConversations: (pipelineId: string) =>
+    request<ChatSession[]>(`/chat/sessions?pipeline_id=${encodeURIComponent(pipelineId)}`),
+  getConversationMessages: (conversationId: string) =>
+    request<ChatMessage[]>(`/chat/sessions/${conversationId}/messages`),
+  sendRagQuery: (payload: { pipelineId: string; conversationId: string | null; query: string }) =>
+    request<ChatResponse>("/rag/query", {
+      method: "POST",
+      body: JSON.stringify({
+        pipeline_id: payload.pipelineId,
+        conversation_id: payload.conversationId,
+        query: payload.query,
+      }),
+    }),
 };
 
 type StreamHandlers = {

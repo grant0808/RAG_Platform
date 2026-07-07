@@ -29,16 +29,22 @@ async def chat(
         session_id=payload.session_id,
         title_seed=payload.message,
     )
-    history = await container.conversations.history(session, chat_session.id)
-    await container.conversations.add_message(
+    user_message = await container.conversations.add_message(
         session,
         session_id=chat_session.id,
         role="user",
-        content=payload.message,
+        content=str(payload.message),
+        metadata={"route": "pending", "selected_tool": "none", "sources": []},
+    )
+    history = await container.conversations.history(
+        session,
+        chat_session.id,
+        limit=container.settings.memory_window_size,
+        exclude_message_id=user_message.id,
     )
     if _is_status_command(payload.message):
         result = await _status_result(container, session, chat_session.id)
-        await container.conversations.add_message(
+        message = await container.conversations.add_message(
             session,
             session_id=chat_session.id,
             role="assistant",
@@ -55,19 +61,25 @@ async def chat(
                 "command": "status",
                 "token_status": result["token_status"],
                 "provider_quota": result["provider_quota"],
+                "memory_used": False,
+                "history_count": len(history),
             },
         )
+        result["session_id"] = chat_session.id
+        result["conversation_id"] = chat_session.id
+        result["message_id"] = message.id
         return ChatResponse.model_validate(result)
 
     result = await container.orchestrator.invoke(
         session,
         pipeline,
-        payload.message,
+        str(payload.message),
         payload.strategy or pipeline.strategy,
         history=[(turn.role, turn.content) for turn in history],
     )
     result["session_id"] = chat_session.id
-    await container.conversations.add_message(
+    result["conversation_id"] = chat_session.id
+    message = await container.conversations.add_message(
         session,
         session_id=chat_session.id,
         role="assistant",
@@ -81,8 +93,11 @@ async def chat(
             "sources": result.get("sources", []),
             "trace": result["trace"],
             "usage": result["usage"],
+            "memory_used": result.get("memory_used", False),
+            "history_count": result.get("history_count", 0),
         },
     )
+    result["message_id"] = message.id
     return ChatResponse.model_validate(result)
 
 
@@ -117,12 +132,18 @@ async def stream_chat(
         session_id=payload.session_id,
         title_seed=payload.message,
     )
-    history = await container.conversations.history(session, chat_session.id)
-    await container.conversations.add_message(
+    user_message = await container.conversations.add_message(
         session,
         session_id=chat_session.id,
         role="user",
-        content=payload.message,
+        content=str(payload.message),
+        metadata={"route": "pending", "selected_tool": "none", "sources": []},
+    )
+    history = await container.conversations.history(
+        session,
+        chat_session.id,
+        limit=container.settings.memory_window_size,
+        exclude_message_id=user_message.id,
     )
     if _is_status_command(payload.message):
         return StreamingResponse(
@@ -136,7 +157,7 @@ async def stream_chat(
             container,
             session,
             pipeline,
-            payload.message,
+            str(payload.message),
             payload.strategy,
             chat_session.id,
             [(turn.role, turn.content) for turn in history],
@@ -165,7 +186,8 @@ async def _sse_events(
         ):
             if event["type"] == "done":
                 event["data"]["session_id"] = chat_session_id
-                await container.conversations.add_message(
+                event["data"]["conversation_id"] = chat_session_id
+                message = await container.conversations.add_message(
                     session,
                     session_id=chat_session_id,
                     role="assistant",
@@ -179,8 +201,11 @@ async def _sse_events(
                         "sources": event["data"].get("sources", []),
                         "trace": event["data"]["trace"],
                         "usage": event["data"]["usage"],
+                        "memory_used": event["data"].get("memory_used", False),
+                        "history_count": event["data"].get("history_count", 0),
                     },
                 )
+                event["data"]["message_id"] = message.id
             data = json.dumps(event["data"], ensure_ascii=False, default=str)
             yield f"event: {event['type']}\ndata: {data}\n\n"
     except Exception as exc:
@@ -199,7 +224,7 @@ async def _status_sse_events(
 ) -> AsyncIterator[str]:
     result = await _status_result(container, session, chat_session_id)
     yield f"event: token\ndata: {json.dumps({'text': result['answer']}, ensure_ascii=False)}\n\n"
-    await container.conversations.add_message(
+    message = await container.conversations.add_message(
         session,
         session_id=chat_session_id,
         role="assistant",
@@ -215,6 +240,8 @@ async def _status_sse_events(
             "provider_quota": result["provider_quota"],
         },
     )
+    result["conversation_id"] = chat_session_id
+    result["message_id"] = message.id
     data = json.dumps(result, ensure_ascii=False, default=str)
     yield f"event: done\ndata: {data}\n\n"
 
@@ -232,6 +259,7 @@ async def _status_result(
     provider_quota = await container.provider_quota.status()
     return {
         "session_id": chat_session_id,
+        "conversation_id": chat_session_id,
         "answer": _status_answer(status, provider_quota),
         "strategy": "status",
         "provider": "system",
@@ -240,6 +268,8 @@ async def _status_result(
         "trace": [],
         "usage": {},
         "cached": False,
+        "memory_used": False,
+        "history_count": 0,
         "token_status": {
             "budget": status.budget,
             "used_total": status.used_total,

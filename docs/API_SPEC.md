@@ -63,6 +63,7 @@ Base URL: `/api/v1`
 
 `/chat/query`는 `/chat`과 동일한 request/response 계약을 사용하는 명시적 query endpoint다. 응답에는 `route`가 포함된다.
 `/rag/query`도 같은 계약을 사용하되 LangGraph 기반 RAG 질의 endpoint로 노출한다.
+요청은 기존 `session_id`/`message`와 새 `conversation_id`/`query`를 모두 지원한다.
 
 - `general`: RAG가 필요 없는 일반 질문
 - `rag`: 업로드 문서/source 기반 질문
@@ -72,6 +73,8 @@ Base URL: `/api/v1`
 
 ```json
 {
+  "conversation_id": "chat-session-id",
+  "message_id": "assistant-message-id",
   "query": "논문에서 method와 result를 비교해줘",
   "rewritten_query": "method result comparison",
   "route": "rag",
@@ -98,7 +101,10 @@ Base URL: `/api/v1`
     }
   ],
   "embedding_model": "BAAI/bge-m3",
-  "reranker_model": "BAAI/bge-reranker-v2-m3"
+  "reranker_model": "BAAI/bge-reranker-v2-m3",
+  "memory_used": true,
+  "history_count": 4,
+  "created_at": "2026-07-07T00:00:00Z"
 }
 ```
 
@@ -131,6 +137,16 @@ analyze_query
 - `PATCH /chat/sessions/{session_id}`
 - `DELETE /chat/sessions/{session_id}`
 - `GET /chat/sessions/{session_id}/messages`
+
+`/conversations` alias도 제공한다.
+
+- `POST /conversations`
+- `GET /conversations`
+- `GET /conversations/{conversation_id}/messages`
+
+Message 응답은 `message_id`, `conversation_id`, `role`, `content`, `route`, `selected_tool`, `sources`, `created_at`을 포함한다. `conversation_id`는 현재 내부 `chat_sessions.id`와 동일하다.
+
+Conversation memory는 `FOUNDRY_MEMORY_ENABLED=true`, `FOUNDRY_MEMORY_WINDOW_SIZE=6`이 기본값이다. 전체 history를 무한정 prompt에 넣지 않고 최근 window만 query rewrite와 답변 prompt에 사용한다.
 
 ## Evaluation
 

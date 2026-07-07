@@ -21,22 +21,29 @@ async def query_rag(
         session_id=payload.session_id,
         title_seed=payload.message,
     )
-    history = await container.conversations.history(session, chat_session.id)
-    await container.conversations.add_message(
+    user_message = await container.conversations.add_message(
         session,
         session_id=chat_session.id,
         role="user",
-        content=payload.message,
+        content=str(payload.message),
+        metadata={"route": "pending", "selected_tool": "none", "sources": []},
+    )
+    history = await container.conversations.history(
+        session,
+        chat_session.id,
+        limit=container.settings.memory_window_size,
+        exclude_message_id=user_message.id,
     )
     result = await container.orchestrator.invoke(
         session,
         pipeline,
-        payload.message,
+        str(payload.message),
         payload.strategy or pipeline.strategy,
         history=[(turn.role, turn.content) for turn in history],
     )
     result["session_id"] = chat_session.id
-    await container.conversations.add_message(
+    result["conversation_id"] = chat_session.id
+    message = await container.conversations.add_message(
         session,
         session_id=chat_session.id,
         role="assistant",
@@ -52,8 +59,11 @@ async def query_rag(
             "sources": result.get("sources", []),
             "trace": result["trace"],
             "usage": result["usage"],
+            "memory_used": result.get("memory_used", False),
+            "history_count": result.get("history_count", 0),
         },
     )
+    result["message_id"] = message.id
     return ChatResponse.model_validate(result)
 
 

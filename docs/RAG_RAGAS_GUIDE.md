@@ -10,11 +10,12 @@
 - Embedding: Hugging Face `BAAI/bge-m3` 기본 고정
 - Vector DB: Chroma 기본값
 - Query workflow: LangGraph 기반 `analyze_query → route_question → rewrite_query → select_retrieval_tool → retrieve_documents → rerank_documents → grade_context`
+- Conversation memory: `chat_sessions`/`chat_messages` 기반 최근 N개 message window를 query rewrite와 답변 prompt에 반영
 - Query route: `general`, `rag`, `web_fallback`
 - Retrieval tools: `keyword_search_healthcare_pdf`, `vector_search_healthcare_pdf`, `hybrid_search_healthcare_pdf`
 - Hybrid search: BM25/Kiwi optional tokenizer + Chroma vector search + RRF
 - Reranker: `BAAI/bge-reranker-v2-m3` 설정, 기본은 lightweight lexical fallback, `RERANKER_LOAD_MODEL=true`에서 CrossEncoder 로딩
-- Web fallback: LangChain `DuckDuckGoSearchRun` 우선, 실패 시 dummy/Tavily provider fallback
+- Web fallback: LangChain `DuckDuckGoSearchRun` 우선, Tavily 또는 `none` provider 설정 지원
 - RAGAS 평가: JSON/CSV dataset 입력, JSON result 저장, RAGAS metric 실행 또는 proxy fallback
 
 ## 환경 변수
@@ -44,11 +45,14 @@
 | `FOUNDRY_RERANK_SCORE_THRESHOLD` | `0.2` | rerank 결과 필터 threshold |
 | `FOUNDRY_MIN_CONTEXT_COUNT` | `2` | 충분한 context 최소 개수 |
 | `FOUNDRY_WEB_FALLBACK_PROVIDER` | `duckduckgo` | 주 web fallback provider |
-| `FOUNDRY_WEB_SEARCH_PROVIDER` | `dummy` | DuckDuckGo 실패 시 보조 provider |
+| `FOUNDRY_WEB_SEARCH_PROVIDER` | `duckduckgo` | 보조 web search provider. `tavily` 사용 시 API key 필요 |
 | `FOUNDRY_DUCKDUCKGO_MAX_RESULTS` | `5` | DuckDuckGo 검색 결과 수 |
 | `FOUNDRY_TAVILY_API_KEY` | empty | Tavily 사용 시 필요 |
 | `FOUNDRY_RAGAS_RESULTS_DIR` | `.data/evaluations` | 평가 결과 JSON 저장 위치 |
 | `FOUNDRY_LANGGRAPH_TRACE_ENABLED` | `false` | LangGraph trace 확장 옵션 |
+| `FOUNDRY_MEMORY_ENABLED` | `true` | conversation memory 사용 여부 |
+| `FOUNDRY_MEMORY_WINDOW_SIZE` | `6` | prompt와 rewrite에 반영할 최근 message 수 |
+| `FOUNDRY_MEMORY_SUMMARY_ENABLED` | `false` | 장기 memory summary 예약 설정. 현재는 window memory만 사용 |
 | `FOUNDRY_OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama base URL |
 
 `BAAI/bge-m3`는 한국어/영어를 모두 다루는 multilingual embedding model이라 논문/기술문서 검색 기본값으로 사용한다. 로컬 장비에서 무거우면 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`로 바꿀 수 있지만, baseline 비교를 위해 한 번 정한 모델은 평가 run 단위에서 고정해야 한다.
@@ -57,17 +61,20 @@
 
 ```text
 사용자 질문
+→ user message 저장
+→ 최근 conversation history load(window 제한)
 → analyze_query
 → route_question
 → general 또는 rag/web_fallback route 선택
-→ rewrite_query
+→ rewrite_query(history가 필요한 후속 질문이면 최근 user turn 키워드 보강)
 → select_retrieval_tool
 → retrieve_documents
 → rerank_documents
 → context 충분성 판단
 → 충분하면 RAG 답변
 → 부족하면 DuckDuckGoSearchRun web fallback
-→ 최종 답변 + sources 반환
+→ assistant message 저장
+→ 최종 답변 + conversation_id/message_id/sources/memory metadata 반환
 ```
 
 RAG router는 “논문에서”, “문서 기준”, “source”, “근거”, “업로드한 PDF” 같은 표현이 있으면 RAG를 실행한다. 단순 인사, 설정/사용법, 일반 대화는 `general`로 처리한다. “최신”, “웹”, “인터넷 검색” 같은 표현은 바로 `web_fallback`으로 보낸다.

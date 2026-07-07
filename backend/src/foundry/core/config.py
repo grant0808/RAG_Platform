@@ -96,7 +96,7 @@ class Settings(BaseSettings):
         ),
     )
     web_search_provider: str = Field(
-        default="dummy",
+        default="duckduckgo",
         validation_alias=AliasChoices(
             "web_search_provider",
             "FOUNDRY_WEB_SEARCH_PROVIDER",
@@ -215,6 +215,26 @@ class Settings(BaseSettings):
             "LANGGRAPH_TRACE_ENABLED",
         ),
     )
+    memory_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("memory_enabled", "FOUNDRY_MEMORY_ENABLED", "MEMORY_ENABLED"),
+    )
+    memory_window_size: int = Field(
+        default=6,
+        validation_alias=AliasChoices(
+            "memory_window_size",
+            "FOUNDRY_MEMORY_WINDOW_SIZE",
+            "MEMORY_WINDOW_SIZE",
+        ),
+    )
+    memory_summary_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "memory_summary_enabled",
+            "FOUNDRY_MEMORY_SUMMARY_ENABLED",
+            "MEMORY_SUMMARY_ENABLED",
+        ),
+    )
     openai_api_key: SecretStr | None = None
     openai_chat_model: str = "gpt-4o-mini"
     ollama_base_url: str = Field(
@@ -228,7 +248,12 @@ class Settings(BaseSettings):
     ollama_chat_model: str = "llama3.1"
     master_key_path: Path = Path(".data/master.key")
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:3000", "http://localhost:4173"]
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+        ]
     )
     provider_timeout_seconds: float = 20.0
     max_upload_bytes: int = 20 * 1024 * 1024

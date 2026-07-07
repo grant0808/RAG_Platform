@@ -29,21 +29,12 @@ class WebSearchProvider(Protocol):
         """Return web search results that can be used as fallback RAG context."""
 
 
-class DummyWebSearchProvider:
-    provider = "dummy"
+class DisabledWebSearchProvider:
+    provider = "none"
 
     async def search(self, query: str, *, max_results: int = 5) -> list[WebSearchResult]:
-        return [
-            WebSearchResult(
-                title="Web search is not configured",
-                url="about:blank",
-                snippet=(
-                    "No external search API key is configured. "
-                    f"Fallback was requested for query: {query}"
-                ),
-                provider=self.provider,
-            )
-        ][:max_results]
+        del query, max_results
+        return []
 
 
 class TavilyWebSearchProvider:
@@ -131,4 +122,6 @@ def build_web_search_provider(settings: Settings) -> WebSearchProvider:
         return DuckDuckGoWebSearchProvider()
     if provider == "tavily" and settings.tavily_api_key is not None:
         return TavilyWebSearchProvider(settings.tavily_api_key.get_secret_value())
-    return DummyWebSearchProvider()
+    if provider == "none":
+        return DisabledWebSearchProvider()
+    return DuckDuckGoWebSearchProvider()

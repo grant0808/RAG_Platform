@@ -35,6 +35,8 @@ class PreparedContext:
     rewritten_query: str | None = None
     selected_tool: str = "none"
     web_results: list[dict[str, Any]] = field(default_factory=list)
+    memory_used: bool = False
+    history_count: int = 0
 
 
 class Orchestrator:
@@ -63,12 +65,13 @@ class Orchestrator:
         history: list[tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
         started_total = time.perf_counter()
-        prepared = await self._prepare(session, pipeline, question, strategy)
+        memory_history = self._memory_history(history or [])
+        prepared = await self._prepare(session, pipeline, question, strategy, memory_history)
         messages = self._messages(
             pipeline,
             question,
             prepared.context,
-            history or [],
+            memory_history,
             prepared.route,
         )
         model = await self._model(session, pipeline)
@@ -119,7 +122,8 @@ class Orchestrator:
         history: list[tuple[str, str]] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         started_total = time.perf_counter()
-        prepared = await self._prepare(session, pipeline, question, strategy)
+        memory_history = self._memory_history(history or [])
+        prepared = await self._prepare(session, pipeline, question, strategy, memory_history)
         for trace in prepared.trace:
             yield {"type": "trace", "data": trace.model_dump(mode="json")}
 
@@ -127,7 +131,7 @@ class Orchestrator:
             pipeline,
             question,
             prepared.context,
-            history or [],
+            memory_history,
             prepared.route,
         )
         model = await self._model(session, pipeline)
@@ -195,24 +199,26 @@ class Orchestrator:
         pipeline: Pipeline,
         question: str,
         strategy: str,
+        history: list[tuple[str, str]] | None = None,
     ) -> PreparedContext:
         if strategy != "rag":
             raise ValidationError(f"Unsupported strategy: {strategy}")
 
         if self.rag_workflow is not None:
             return self._from_graph_prepared(
-                await self.rag_workflow.prepare(pipeline, question)
+                await self.rag_workflow.prepare(pipeline, question, history=history)
             )
 
         async def prepare(_: dict[str, str]) -> PreparedContext:
             decision = self.router.decide(question)
             if decision.route == "general":
-                return self._prepare_general(decision.reason)
+                return self._prepare_general(decision.reason, history)
             return await self._prepare_rag_or_web(
                 pipeline,
                 question,
                 decision.route,
                 decision.reason,
+                history,
             )
 
         runnable = RunnableLambda(prepare, name=f"{strategy}_context_runnable")
@@ -231,13 +237,22 @@ class Orchestrator:
             rewritten_query=prepared.rewritten_query,
             selected_tool=prepared.selected_tool,
             web_results=prepared.web_results,
+            memory_used=prepared.memory_used,
+            history_count=prepared.history_count,
         )
 
-    def _prepare_general(self, reason: str) -> PreparedContext:
+    def _prepare_general(
+        self,
+        reason: str,
+        history: list[tuple[str, str]] | None = None,
+    ) -> PreparedContext:
+        history_count = len(history or []) if self.settings.memory_enabled else 0
         return PreparedContext(
             context="No retrieved context was requested for this general question.",
             route="general",
             route_reason=reason,
+            memory_used=bool(history_count),
+            history_count=history_count,
             trace=[
                 TraceEvent(
                     step="rag_router",
@@ -254,6 +269,7 @@ class Orchestrator:
         question: str,
         route: str,
         reason: str,
+        history: list[tuple[str, str]] | None = None,
     ) -> PreparedContext:
         if route == "web_fallback":
             return await self._prepare_web_fallback(
@@ -261,8 +277,9 @@ class Orchestrator:
                 question,
                 reason,
                 prior_trace=[],
+                history=history,
             )
-        prepared = await self._prepare_rag(pipeline, question)
+        prepared = await self._prepare_rag(pipeline, question, history)
         prepared.route_reason = reason
         prepared.trace.insert(
             0,
@@ -279,10 +296,16 @@ class Orchestrator:
                 question,
                 "RAG context was insufficient; using web fallback",
                 prior_trace=prepared.trace,
+                history=history,
             )
         return prepared
 
-    async def _prepare_rag(self, pipeline: Pipeline, question: str) -> PreparedContext:
+    async def _prepare_rag(
+        self,
+        pipeline: Pipeline,
+        question: str,
+        history: list[tuple[str, str]] | None = None,
+    ) -> PreparedContext:
         started = time.perf_counter()
         candidate_k = max(pipeline.top_k * 4, pipeline.top_k)
         hits = await asyncio.to_thread(
@@ -300,6 +323,8 @@ class Orchestrator:
             context=context or "No relevant context was found.",
             citations=citations,
             route="rag",
+            memory_used=bool(history) and self.settings.memory_enabled,
+            history_count=len(history or []) if self.settings.memory_enabled else 0,
             contexts=[self._document_context(document) for document in documents],
             sources=[self._source_payload(citation, "document") for citation in citations],
             trace=[
@@ -336,6 +361,7 @@ class Orchestrator:
         question: str,
         reason: str,
         prior_trace: list[TraceEvent],
+        history: list[tuple[str, str]] | None = None,
     ) -> PreparedContext:
         del pipeline
         started = time.perf_counter()
@@ -369,6 +395,8 @@ class Orchestrator:
             citations=[self._web_citation(result) for result in results],
             route="web_fallback",
             route_reason=reason,
+            memory_used=bool(history) and self.settings.memory_enabled,
+            history_count=len(history or []) if self.settings.memory_enabled else 0,
             contexts=[result.snippet for result in results],
             sources=[self._web_source_payload(result) for result in results],
             trace=trace,
@@ -452,6 +480,11 @@ class Orchestrator:
                 HumanMessage(content=f"<context>\n{context}\n</context>\n\nQuestion: {question}")
             )
         return messages
+
+    def _memory_history(self, history: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        if not self.settings.memory_enabled:
+            return []
+        return history[-self.settings.memory_window_size :]
 
     @staticmethod
     def _documents_context(documents: Any) -> str:
@@ -589,4 +622,6 @@ class Orchestrator:
             "latency_ms": latency_ms,
             "created_at": datetime.now(UTC),
             "cached": cached,
+            "memory_used": prepared.memory_used,
+            "history_count": prepared.history_count,
         }

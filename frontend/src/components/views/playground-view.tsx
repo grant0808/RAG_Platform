@@ -11,6 +11,7 @@ import type {
   Citation,
   EvaluationResult,
   Pipeline,
+  SourceReference,
   Strategy,
   TraceEvent,
 } from "@/lib/types";
@@ -21,6 +22,7 @@ type Message = {
   text: string;
   result?: ChatResponse;
   citations?: Citation[];
+  sources?: SourceReference[];
 };
 
 const EMPTY_MESSAGE: Message = {
@@ -97,6 +99,8 @@ export function PlaygroundView({
               id: message.id,
               role: message.role,
               text: message.content,
+              sources: message.sources ?? readSources(message.message_metadata),
+              result: readResult(message),
             }))
           : [EMPTY_MESSAGE],
       );
@@ -184,13 +188,13 @@ export function PlaygroundView({
             ),
           ),
         onDone: (result) => {
-          setActiveSessionId(result.session_id);
-          const knownSession = sessions.find((session) => session.id === result.session_id);
+          setActiveSessionId(result.conversation_id ?? result.session_id);
+          const knownSession = sessions.find((session) => session.id === (result.conversation_id ?? result.session_id));
           if (knownSession) setSessionTitleDraft(knownSession.title);
           setMessages((current) =>
             current.map((message) =>
               message.id === assistantId
-                ? { ...message, text: result.answer, result, citations: result.citations }
+                ? { ...message, id: result.message_id ?? message.id, text: result.answer, result, citations: result.citations, sources: result.sources }
                 : message,
             ),
           );
@@ -318,8 +322,18 @@ export function PlaygroundView({
           <div className="messages" aria-live="polite">
             {messages.map((message) => (
               <article key={message.id} className={`message ${message.role}`}>
-                <span>{message.role === "user" ? "YOU" : `FOUNDRY / ${message.result?.strategy?.toUpperCase() ?? "READY"}`}</span>
+                <span>{message.role === "user" ? "YOU" : `FOUNDRY / ${(message.result?.route ?? message.result?.strategy ?? "ready").toUpperCase()}`}</span>
                 <div>{message.text || <span className="typing">Running...</span>}</div>
+                {message.result && (
+                  <div className="message-meta">
+                    <span>{message.result.route}</span>
+                    <span>{message.result.selected_tool ?? "none"}</span>
+                    <span>{message.result.memory_used ? `memory ${message.result.history_count}` : "memory off"}</span>
+                  </div>
+                )}
+                {message.sources && message.sources.length > 0 && (
+                  <SourceList sources={message.sources} />
+                )}
                 {message.citations && message.citations.length > 0 && (
                   <footer>
                     {message.citations.map((citation, index) => (
@@ -375,8 +389,8 @@ export function PlaygroundView({
           </div>
           <div className="trace-metrics">
             <div>
-              <span>STRATEGY</span>
-              <b>{lastResult?.strategy.toUpperCase() ?? strategy.toUpperCase()}</b>
+              <span>ROUTE</span>
+              <b>{lastResult?.route?.toUpperCase() ?? strategy.toUpperCase()}</b>
             </div>
             <div>
               <span>MODEL</span>
@@ -387,8 +401,8 @@ export function PlaygroundView({
               <b>{lastResult?.usage.total_tokens ?? "--"}</b>
             </div>
             <div>
-              <span>CITATIONS</span>
-              <b>{lastResult?.citations.length ?? 0}</b>
+              <span>MEMORY</span>
+              <b>{lastResult?.memory_used ? lastResult.history_count : 0}</b>
             </div>
           </div>
           {evaluation && (
@@ -411,4 +425,70 @@ export function PlaygroundView({
       </div>
     </section>
   );
+}
+
+function readSources(metadata: Record<string, unknown>): SourceReference[] {
+  return Array.isArray(metadata.sources) ? (metadata.sources as SourceReference[]) : [];
+}
+
+function readResult(message: { message_metadata: Record<string, unknown> }): ChatResponse | undefined {
+  const metadata = message.message_metadata;
+  const route = metadata.route;
+  if (typeof route !== "string") return undefined;
+  return {
+    session_id: null,
+    conversation_id: null,
+    message_id: null,
+    answer: "",
+    strategy: typeof metadata.strategy === "string" ? metadata.strategy : "rag",
+    provider: "",
+    model: "",
+    route: route === "general" || route === "web_fallback" ? route : "rag",
+    selected_tool: typeof metadata.selected_tool === "string" ? metadata.selected_tool : null,
+    citations: Array.isArray(metadata.citations) ? (metadata.citations as Citation[]) : [],
+    trace: Array.isArray(metadata.trace) ? (metadata.trace as TraceEvent[]) : [],
+    usage: isRecord(metadata.usage) ? (metadata.usage as Record<string, number>) : {},
+    sources: readSources(metadata),
+    contexts: Array.isArray(metadata.contexts) ? metadata.contexts : [],
+    web_results: Array.isArray(metadata.web_results) ? (metadata.web_results as ChatResponse["web_results"]) : [],
+    cached: Boolean(metadata.cached),
+    memory_used: Boolean(metadata.memory_used),
+    history_count: typeof metadata.history_count === "number" ? metadata.history_count : 0,
+  };
+}
+
+function SourceList({ sources }: { sources: SourceReference[] }) {
+  return (
+    <div className="source-list">
+      {sources.map((source, index) => {
+        if (isWebSource(source)) {
+          return (
+            <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer">
+              <strong>{source.title || "Web source"}</strong>
+              <span>{source.provider ?? "web"} / {source.snippet}</span>
+            </a>
+          );
+        }
+        const record = source as Record<string, unknown>;
+        const filename = record.filename ?? record.source_name ?? record.source ?? "PDF source";
+        const page = record.page ?? record.location ?? "-";
+        const chunk = record.chunk_id ?? "-";
+        const score = record.rerank_score ?? record.score ?? "-";
+        return (
+          <div key={`${String(filename)}-${index}`}>
+            <strong>{String(filename)}</strong>
+            <span>page {String(page)} / chunk {String(chunk)} / score {String(score)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function isWebSource(source: SourceReference): source is ChatResponse["web_results"][number] {
+  return isRecord(source) && typeof source.url === "string" && typeof source.snippet === "string";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

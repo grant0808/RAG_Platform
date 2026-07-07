@@ -74,6 +74,8 @@ export interface Citation {
   source_name: string;
   location: string | null;
   score: number | null;
+  url?: string | null;
+  provider?: string | null;
 }
 
 export interface TraceEvent {
@@ -85,6 +87,12 @@ export interface TraceEvent {
 
 export interface ChatResponse {
   session_id: string | null;
+  conversation_id: string | null;
+  message_id: string | null;
+  query?: string | null;
+  rewritten_query?: string | null;
+  route: "general" | "rag" | "web_fallback";
+  selected_tool?: string | null;
   answer: string;
   strategy: string;
   provider: string;
@@ -92,7 +100,12 @@ export interface ChatResponse {
   citations: Citation[];
   trace: TraceEvent[];
   usage: Record<string, number>;
+  sources: SourceReference[];
+  contexts: unknown[];
+  web_results: WebSourceReference[];
   cached: boolean;
+  memory_used: boolean;
+  history_count: number;
   token_status?: {
     budget: number;
     used_total: number;
@@ -114,12 +127,40 @@ export interface ChatSession {
 
 export interface ChatMessage {
   id: string;
+  message_id?: string | null;
   session_id: string;
+  conversation_id?: string | null;
   role: "user" | "assistant";
   content: string;
   message_metadata: Record<string, unknown>;
+  route?: "general" | "rag" | "web_fallback" | null;
+  selected_tool?: string | null;
+  sources?: SourceReference[];
   created_at: string;
 }
+
+export interface PdfSourceReference {
+  type: "pdf" | "document";
+  source?: string | null;
+  source_id?: string | null;
+  source_name?: string | null;
+  filename?: string | null;
+  page?: number | string | null;
+  chunk_id?: string | null;
+  score?: number | null;
+  rerank_score?: number | null;
+  location?: string | null;
+}
+
+export interface WebSourceReference {
+  type?: "web";
+  title: string;
+  url: string;
+  snippet: string;
+  provider?: string;
+}
+
+export type SourceReference = PdfSourceReference | WebSourceReference | Record<string, unknown>;
 
 export interface EvaluationResult {
   pipeline_id: string;
