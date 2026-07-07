@@ -36,9 +36,9 @@ uv run uvicorn foundry.main:app --reload
 - Pipeline: RAG 데모 1개
 - Deployment: `local-rag-preview`
 - 기본 DB: `postgresql+asyncpg://foundry:foundry@localhost:5432/foundry`
-- 기본 vector store: Chroma persistent store `.data/chroma`, collection `foundry_documents`
+- 기본 vector store: Chroma persistent store `.data/chroma`, collection `healthcare_pdf_papers`
 
-`.env.example`의 `FOUNDRY_FAKE_LLM_ENABLED=false`는 실제 provider chat 호출을 사용합니다. 기본 PDF parser는 `FOUNDRY_PDF_PARSER=docling`, 기본 embedding은 `FOUNDRY_EMBEDDING_PROVIDER=huggingface`, `FOUNDRY_HUGGINGFACE_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2`입니다. OpenAI embedding을 사용하려면 `FOUNDRY_EMBEDDING_PROVIDER=openai`로 바꾸고 `FOUNDRY_OPENAI_EMBEDDING_API_KEY`, `FOUNDRY_OPENAI_ADMIN_API_KEY`, 또는 `OPENAI_API_KEY` 중 하나를 설정합니다.
+`.env.example`의 `FOUNDRY_FAKE_LLM_ENABLED=false`는 실제 provider chat 호출을 사용합니다. 기본 PDF parser는 `FOUNDRY_PDF_PARSER=docling`, 기본 embedding은 `FOUNDRY_EMBEDDING_PROVIDER=huggingface`, `FOUNDRY_HUGGINGFACE_EMBEDDING_MODEL=BAAI/bge-m3`입니다. 로컬 장비에서 무거우면 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`로 변경할 수 있지만, 평가 baseline에서는 한 모델을 고정하세요. OpenAI embedding을 사용하려면 `FOUNDRY_EMBEDDING_PROVIDER=openai`로 바꾸고 `FOUNDRY_OPENAI_EMBEDDING_API_KEY`, `FOUNDRY_OPENAI_ADMIN_API_KEY`, 또는 `OPENAI_API_KEY` 중 하나를 설정합니다.
 
 Ollama를 로컬 모델 provider로 사용하려면 Ollama를 먼저 실행하고 모델을 내려받습니다.
 
@@ -109,11 +109,31 @@ docker compose exec api uv run foundry-local bootstrap
 ## 빠른 사용 순서
 
 1. `PUT /api/v1/providers/openai`, `/anthropic`, 또는 `/ollama`에 provider 연결 정보 등록
-2. `POST /api/v1/sources/upload`로 문서 업로드
+2. `POST /api/v1/sources/upload`로 문서 업로드 또는 `POST /api/v1/sources/papers`로 논문 PDF 업로드
 3. `POST /api/v1/pipelines`로 모델과 검색 설정
-4. `POST /api/v1/chat` 또는 `/chat/stream` 실행
+4. `POST /api/v1/chat`, `/chat/query`, `/rag/query`, 또는 `/chat/stream` 실행
 5. `POST /api/v1/pipelines/{id}/versions`로 설정 snapshot 저장
 6. `POST /api/v1/deployments`로 공개 slug 생성
+
+LangGraph workflow는 질문을 `general`, `rag`, `web_fallback` 중 하나로 분류한다. 업로드 문서/source 기반 질문만 query rewrite, retrieval tool 선택, BM25/Chroma/Hybrid 검색, BGE reranker wrapper, context grading을 실행한다. 검색 결과가 없거나 rerank 결과가 부족하면 `DuckDuckGoSearchRun` fallback을 사용한다.
+
+기본 fallback provider는 DuckDuckGo이며, 네트워크/패키지 문제 또는 테스트 환경에서는 dummy provider로 graceful fallback한다. Tavily를 보조 provider로 쓰려면 다음 값을 설정한다.
+
+```env
+FOUNDRY_WEB_FALLBACK_PROVIDER=duckduckgo
+FOUNDRY_WEB_SEARCH_PROVIDER=tavily
+FOUNDRY_TAVILY_API_KEY=...
+```
+
+RAGAS 호환 평가:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/rag/evaluate \
+  -H 'Content-Type: application/json' \
+  -d '{"pipeline_id":"PIPELINE_ID","run_name":"bge-m3-baseline","dataset":[{"question":"핵심 방법론은?","ground_truth":"기준 답변"}]}'
+```
+
+결과는 `FOUNDRY_RAGAS_RESULTS_DIR` 아래 JSON으로 저장된다.
 
 SSE event 형식:
 

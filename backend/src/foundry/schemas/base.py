@@ -15,6 +15,8 @@ class Citation(BaseModel):
     source_name: str
     location: str | None = None
     score: float | None = None
+    url: str | None = None
+    provider: str | None = None
 
 
 class TraceEvent(BaseModel):

@@ -29,7 +29,7 @@ Foundry는 인증이 꺼진 로컬 PoC 형태의 FastAPI/Next.js 기반 RAG work
 
 - 실제 구현: Provider 연결, 문서 업로드/인덱싱, RAG pipeline 관리, chat/SSE streaming, citation/trace, chat session, 기본 evaluation, deployment/public chat, `/status` token/provider quota command.
 - 부분 구현: 논문 PDF 처리. Docling metadata, heading, page, label 추출은 있으나 PRD의 논문 비교, 실험 결과 추출, 한계점 추출 전용 기능은 별도 API/화면으로 확인되지 않는다.
-- 미구현 또는 추가 계획: 회원가입/로그인, 사용자/권한 관리, 관리자 화면, 정식 RAGAS metric 평가, 자동 모델 라우팅, 비용 최적화 추천, workspace/project 관리.
+- 미구현 또는 추가 계획: 회원가입/로그인, 사용자/권한 관리, 관리자 화면, judge-model 기반 정식 RAGAS metric 평가, 비용 최적화 추천, workspace/project 관리.
 
 ## 3. 실제 확인된 기능 목록
 
@@ -41,7 +41,7 @@ Foundry는 인증이 꺼진 로컬 PoC 형태의 FastAPI/Next.js 기반 RAG work
 | PDF 처리 | `docling` 또는 `pypdf` parser, Docling chunk metadata, page/headings/labels 추출, 빈 PDF는 `no_text` 상태 저장 | `services/sources.py`, `test_pdf_upload_*` |
 | Knowledge index | local/hash, Hugging Face, OpenAI embedding 지원. memory, Chroma, PostgreSQL/pgvector vector store 지원. BM25 sparse index와 RRF fusion 검색 | `services/knowledge.py`, `.env.example` |
 | Pipeline 관리 | pipeline 생성/조회/수정/삭제, version 저장, rollback 시 새 head version 생성 | `pipelines.py`, `services/pipelines.py`, `PipelineView` |
-| RAG 실행 | pipeline 기반 retrieval, context 구성, OpenAI/Anthropic/Ollama chat model 호출, citation/trace/usage 반환 | `chat.py`, `services/orchestrator.py` |
+| RAG 실행 | LangGraph 기반 route/rewrite/tool selection/retrieval/rerank/context grading, OpenAI/Anthropic/Ollama chat model 호출, citation/trace/usage 반환 | `chat.py`, `endpoints/rag.py`, `services/langgraph_workflow.py`, `services/orchestrator.py` |
 | SSE streaming | `trace`, `token`, `citation`, `done`, `error` event 제공 | `chat.py`, `streamChat` |
 | Chat session | session 생성/조회/이름 변경/삭제, message 저장, 최근 12개 history 사용 | `conversations.py`, `services/conversations.py`, `PlaygroundView` |
 | Token status | `/status` 채팅 명령으로 session token usage와 provider quota status 반환 | `chat.py`, `provider_quota.py`, `test_status_command_*` |
@@ -56,7 +56,7 @@ Foundry는 인증이 꺼진 로컬 PoC 형태의 FastAPI/Next.js 기반 RAG work
 | 사용자별 API Key | 확인 필요 | Provider credential 저장은 구현되어 있으나 인증/사용자 모델이 없어 “사용자별” 격리는 현재 확인되지 않는다. |
 | 관리자 기능 | 확인 필요 | Admin API key를 이용한 provider quota 조회는 있으나 관리자 권한/관리자 화면은 없다. |
 | Workspace/Project 관리 | 추가 제안 | 현재 UI는 `Personal lab` 문구만 있으며 별도 workspace entity/API는 없다. |
-| 정식 RAGAS 평가 | 추가 제안 | PRD에는 RAGAS가 있으나 현재 `evaluation.py`는 RAGAS metric이 아니라 citation 유무 기반 proxy를 사용한다. |
+| RAGAS 호환 평가 | 부분 구현 | `POST /evaluations/ragas`가 RAGAS dataset 형식으로 pipeline을 실행하고 Faithfulness, Answer Relevancy, Context Precision, Context Recall proxy score를 JSON 저장한다. judge-model 기반 `ragas.evaluate()` 연결은 후속 작업이다. |
 | 자동 모델 라우팅 | 추가 제안 | pipeline provider/model은 수동 설정이며 query difficulty 기반 라우터는 없다. |
 | 비용 최적화 추천 | 추가 제안 | token usage와 provider quota status 일부는 있으나 비용 추천 엔진은 없다. |
 | 논문 비교/실험 결과/한계점 추출 | 추가 제안 | PDF metadata와 chunking은 있으나 전용 분석 API/화면은 확인되지 않는다. |
@@ -387,7 +387,7 @@ Then LLM 호출 없이 token_status와 provider_quota 정보를 반환해야 한
 | 제외 기능 | 제외 이유 | 추후 반영 시점 |
 | --- | --- | --- |
 | 회원가입/로그인/RBAC | 현재 local PoC 범위 밖 | 외부 공유/운영 배포 전 |
-| 정식 RAGAS 평가 | 현재 evaluation은 proxy metric | 품질 비교 기능 확장 단계 |
+| judge-model 기반 정식 RAGAS 평가 | 현재 RAGAS 호환 proxy metric 저장 | 품질 비교 기능 확장 단계 |
 | 자동 모델 라우팅 | 현재 pipeline 수동 선택 구조 | 비용 최적화 고도화 단계 |
 | 논문 비교/실험 결과/한계점 추출 | 전용 API/화면 없음 | 논문 RAG 제품화 단계 |
 | 관리자 대시보드 | admin role/entity 없음 | multi-user 운영 전 |
@@ -400,7 +400,7 @@ Then LLM 호출 없이 token_status와 provider_quota 정보를 반환해야 한
 | 제안 | 목적 | 필요 이유 |
 | --- | --- | --- |
 | 인증/사용자/워크스페이스 | provider key와 source를 사용자별로 격리 | 현재 인증 없음으로 운영 공개 불가 |
-| RAGAS 평가셋/실행/대시보드 | Faithfulness, Answer Relevancy, Context Precision/Recall 측정 | 현재 evaluation은 citation 기반 proxy |
+| RAGAS 평가셋/실행/대시보드 | Faithfulness, Answer Relevancy, Context Precision/Recall 측정 | API와 JSON 저장은 구현, dashboard와 judge-model 기반 RAGAS는 후속 작업 |
 | 자동 모델 라우팅 | 질문 난이도/비용/품질 기준으로 OpenAI/Claude/Ollama 선택 | PRD 목표와 비용 최적화 요구 충족 |
 | 비용 대시보드 | provider/model별 token/cost 추적 | `/status`보다 넓은 제품 관찰성 필요 |
 | 논문 분석 전용 workflow | 요약, 개념 설명, 실험 결과, 한계점, 논문 비교 | 논문 RAG 플랫폼 페르소나 강화 |

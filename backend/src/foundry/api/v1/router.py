@@ -9,6 +9,7 @@ from foundry.api.v1.endpoints import (
     pipelines,
     providers,
     public,
+    rag,
     sources,
 )
 
@@ -20,6 +21,8 @@ router.include_router(sources.router)
 router.include_router(pipelines.router)
 router.include_router(conversations.router)
 router.include_router(chat.router)
+router.include_router(rag.router)
 router.include_router(deployments.router)
 router.include_router(public.router)
 router.include_router(evaluation.router)
+router.include_router(evaluation.rag_router)

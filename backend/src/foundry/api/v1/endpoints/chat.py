@@ -13,6 +13,7 @@ from foundry.schemas import ChatRequest, ChatResponse
 from foundry.services.conversations import TokenStatus
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+rag_router = APIRouter(prefix="/rag", tags=["rag"])
 
 
 @router.post("", response_model=ChatResponse)
@@ -44,8 +45,11 @@ async def chat(
             content=str(result["answer"]),
             metadata={
                 "strategy": result["strategy"],
+                "route": result.get("route"),
                 "cached": result["cached"],
                 "citations": result["citations"],
+                "contexts": result.get("contexts", []),
+                "sources": result.get("sources", []),
                 "trace": result["trace"],
                 "usage": result["usage"],
                 "command": "status",
@@ -72,11 +76,32 @@ async def chat(
             "strategy": result["strategy"],
             "cached": result["cached"],
             "citations": result["citations"],
+            "route": result.get("route"),
+            "contexts": result.get("contexts", []),
+            "sources": result.get("sources", []),
             "trace": result["trace"],
             "usage": result["usage"],
         },
     )
     return ChatResponse.model_validate(result)
+
+
+@router.post("/query", response_model=ChatResponse)
+async def query_chat(
+    payload: ChatRequest,
+    session: AsyncSession = Depends(get_session),
+    container: Container = Depends(get_container),
+) -> ChatResponse:
+    return await chat(payload, session, container)
+
+
+@rag_router.post("/query", response_model=ChatResponse)
+async def query_rag(
+    payload: ChatRequest,
+    session: AsyncSession = Depends(get_session),
+    container: Container = Depends(get_container),
+) -> ChatResponse:
+    return await chat(payload, session, container)
 
 
 @router.post("/stream")
@@ -147,8 +172,11 @@ async def _sse_events(
                     content=str(event["data"]["answer"]),
                     metadata={
                         "strategy": event["data"]["strategy"],
+                        "route": event["data"].get("route"),
                         "cached": event["data"]["cached"],
                         "citations": event["data"]["citations"],
+                        "contexts": event["data"].get("contexts", []),
+                        "sources": event["data"].get("sources", []),
                         "trace": event["data"]["trace"],
                         "usage": event["data"]["usage"],
                     },

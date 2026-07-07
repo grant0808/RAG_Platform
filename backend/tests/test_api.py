@@ -235,6 +235,280 @@ def test_source_pipeline_version_and_rag_chat(client, app, monkeypatch):
     assert any(event["step"] == "retriever" for event in body["trace"])
 
 
+def test_general_question_skips_rag_route(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "안녕, 간단히 인사해줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "general"
+    assert body["contexts"] == []
+    assert body["citations"] == []
+    assert any(event["step"] == "rag_router" for event in body["trace"])
+
+
+def test_web_fallback_route_uses_dummy_provider(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "최신 RAG 논문 동향을 웹에서 찾아줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "web_fallback"
+    assert body["sources"][0]["type"] == "web"
+    assert body["sources"][0]["provider"] == "dummy"
+    assert any(event["step"] == "web_search" for event in body["trace"])
+
+
+def test_chat_routes_general_questions_without_retrieval(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat/query",
+        json={"pipeline_id": pipeline["id"], "message": "안녕, 오늘 테스트 상태를 알려줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "general"
+    assert body["citations"] == []
+    assert not any(event["step"] == "retriever" for event in body["trace"])
+
+
+def test_langgraph_rag_route_selects_keyword_tool_for_exact_terms(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("paper.md", "BERT fine-tuning experiment Table 2 accuracy result.")},
+    )
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "논문에서 BERT Table 2 결과는?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] in {"rag", "web_fallback"}
+    assert body["selected_tool"] == "keyword_search_healthcare_pdf"
+    assert body["rewritten_query"]
+    assert any(event["step"] == "rewrite_query" for event in body["trace"])
+
+
+def test_langgraph_rag_route_selects_vector_tool_for_definition(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    client.post(
+        "/api/v1/sources/upload",
+        files={
+            "file": (
+                "paper.md",
+                "Retrieval augmented generation combines search and generation.",
+            )
+        },
+    )
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "문서에서 RAG 개념을 설명해줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["selected_tool"] == "vector_search_healthcare_pdf"
+    assert any(event["step"] == "select_retrieval_tool" for event in body["trace"])
+
+
+def test_langgraph_rag_route_uses_duckduckgo_fallback_when_context_missing(
+    client,
+    app,
+    monkeypatch,
+):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "업로드한 논문에서 없는 실험 결과는?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "web_fallback"
+    assert body["web_results"]
+    assert body["sources"][0]["type"] == "web"
+    assert any(event["step"] == "web_search_fallback" for event in body["trace"])
+
+
+def test_chat_uses_dummy_web_fallback_when_rag_context_is_missing(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "업로드한 논문에서 모델 한계는?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "web_fallback"
+    assert body["sources"][0]["type"] == "web"
+    assert body["citations"][0]["provider"] == "dummy"
+    assert any(event["step"] == "web_search" for event in body["trace"])
+
+
+def test_langgraph_rag_query_routes_general_without_retrieval(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "안녕, 간단히 인사해줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "general"
+    assert body["selected_tool"] == "none"
+    assert body["contexts"] == []
+    assert any(event["step"] == "route_question" for event in body["trace"])
+
+
+def test_langgraph_rag_query_uses_hybrid_tool_and_reranker(client, app, monkeypatch):
+    app.state.container.settings.min_context_count = 1
+    app.state.container.settings.rerank_score_threshold = 0
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    upload = client.post(
+        "/api/v1/sources/upload",
+        files={
+            "file": (
+                "paper.md",
+                "Transformer method improves attention experiment result. "
+                "The limitation is compute cost.",
+            )
+        },
+    )
+    assert upload.status_code == 201
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "논문에서 method와 result를 비교해줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "rag"
+    assert body["selected_tool"] == "hybrid_search_healthcare_pdf"
+    assert body["rewritten_query"]
+    assert body["contexts"]
+    assert body["contexts"][0]["rerank_score"] >= 0
+    assert body["reranker_model"] == "BAAI/bge-reranker-v2-m3"
+    assert any(event["step"] == "rerank_documents" for event in body["trace"])
+
+
+def test_langgraph_rag_query_falls_back_to_web_when_context_missing(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={
+            "pipeline_id": pipeline["id"],
+            "message": "업로드한 PDF에서 unknown method 한계를 찾아줘",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "web_fallback"
+    assert body["sources"][0]["type"] == "web"
+    assert body["web_results"][0]["provider"] == "dummy"
+    assert any(event["step"] == "web_search_fallback" for event in body["trace"])
+
+
+def test_retrieval_tool_selector_prefers_keyword_vector_and_hybrid(client, app):
+    tools = app.state.container.langgraph_workflow.retrieval_tools
+
+    assert (
+        tools.select_tool(
+            rewritten_query="BERT dataset table 2",
+            search_intent="general",
+            keywords=["bert", "dataset"],
+        )
+        == "keyword_search_healthcare_pdf"
+    )
+    assert (
+        tools.select_tool(
+            rewritten_query="attention mechanism concept",
+            search_intent="definition",
+            keywords=["attention", "mechanism"],
+        )
+        == "vector_search_healthcare_pdf"
+    )
+    assert (
+        tools.select_tool(
+            rewritten_query="method experiment result comparison",
+            search_intent="comparison",
+            keywords=["method", "experiment", "result"],
+        )
+        == "hybrid_search_healthcare_pdf"
+    )
+
+
+def test_ragas_evaluation_endpoint_persists_json_result(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/evaluations/ragas",
+        json={
+            "pipeline_id": pipeline["id"],
+            "run_name": "smoke",
+            "dataset": [
+                {
+                    "question": "업로드한 논문에서 Atlas Pro 정책은?",
+                    "ground_truth": "Atlas Pro support handbook and warranty policy.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run_name"] == "smoke"
+    assert body["ragas_backend"] in {"proxy", "ragas-installed-proxy-runner"}
+    assert body["averages"].keys() >= {
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall",
+    }
+    assert (app.state.container.settings.ragas_results_dir / f"{body['id']}.json").exists()
+
+
 def test_invalid_upload_returns_validation_error(client):
     response = client.post(
         "/api/v1/sources/upload",
@@ -449,11 +723,53 @@ def test_chroma_vector_store_indexes_documents_without_external_service(tmp_path
         [Document(page_content="graph neural networks", metadata={"knowledge_id": "paper-1"})]
     )
 
-    assert vector_store.store.collection_name == "foundry_documents"
+    assert vector_store.store.collection_name == "healthcare_pdf_papers"
     assert vector_store.store.persist_directory == str(tmp_path / "chroma")
     assert vector_store.similarity_search_with_score("neural", k=1)[0][0].page_content.startswith(
         "graph"
     )
+
+
+def test_ragas_evaluation_endpoint_stores_json_result(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    upload = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("handbook.md", "Atlas Pro support handbook and warranty policy.")},
+    )
+    assert upload.status_code == 201
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/evaluations/ragas",
+        json={
+            "pipeline_id": pipeline["id"],
+            "run_name": "smoke-ragas",
+            "dataset": [
+                {
+                    "question": "문서에서 Atlas Pro 정책은?",
+                    "ground_truth": "Atlas Pro support handbook and warranty policy.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run_name"] == "smoke-ragas"
+    assert body["ragas_backend"] in {"proxy", "ragas-installed-proxy-runner"}
+    assert body["metrics"][0]["question"] == "문서에서 Atlas Pro 정책은?"
+    assert set(body["averages"]) == {
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall",
+    }
+    assert app.state.container.settings.ragas_results_dir.joinpath(f"{body['id']}.json").exists()
+
+    listed = client.get("/api/v1/evaluations/ragas")
+    assert listed.status_code == 200
+    assert any(item["id"] == body["id"] for item in listed.json())
 
 
 def test_table_upload_is_no_longer_supported(client):

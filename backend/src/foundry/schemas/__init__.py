@@ -12,6 +12,10 @@ from foundry.schemas.evaluation import (
     EvaluationMetric,
     EvaluationResultResponse,
     EvaluationRunRequest,
+    RagasDatasetItem,
+    RagasEvaluationRequest,
+    RagasEvaluationResponse,
+    RagasMetricScore,
 )
 from foundry.schemas.pipeline import (
     PipelineCreate,
@@ -49,4 +53,8 @@ __all__ = [
     "EvaluationMetric",
     "EvaluationResultResponse",
     "EvaluationRunRequest",
+    "RagasDatasetItem",
+    "RagasEvaluationRequest",
+    "RagasEvaluationResponse",
+    "RagasMetricScore",
 ]

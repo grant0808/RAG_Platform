@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -304,6 +305,7 @@ class SourceService:
                     "file_extension": ".pdf",
                     "title": source.name,
                     "normalized_format": "plain_text",
+                    **self._paper_fields_from_text(text),
                 },
             )
         ]
@@ -455,7 +457,10 @@ class SourceService:
             "file_extension": path.suffix.lower(),
             "normalized_format": "markdown",
             "title": str(getattr(document, "name", None) or source.name),
+            "source_filename": source.name,
+            "source_path": str(path),
         }
+        metadata.update(SourceService._paper_fields_from_text(content))
         if pages is not None:
             try:
                 metadata["page_count"] = len(pages)
@@ -463,6 +468,13 @@ class SourceService:
                 pass
         if headings:
             metadata["headings"] = " | ".join(headings[:20])
+            detected_sections = [
+                heading
+                for heading in headings[:40]
+                if SourceService._looks_like_section_heading(heading)
+            ]
+            if detected_sections:
+                metadata["sections_detected"] = " | ".join(detected_sections)
         return metadata
 
     @staticmethod
@@ -493,6 +505,76 @@ class SourceService:
             if label is not None:
                 labels.add(str(label))
         return sorted(labels)
+
+    @staticmethod
+    def _paper_fields_from_text(text: str) -> dict[str, str | int]:
+        lines = [line.strip(" #\t") for line in text.splitlines() if line.strip()]
+        payload: dict[str, str | int] = {}
+        if lines:
+            payload["detected_title"] = lines[0][:300]
+        year = SourceService._first_publication_year(text)
+        if year is not None:
+            payload["publication_year"] = year
+        abstract = SourceService._section_excerpt(lines, "abstract")
+        if abstract:
+            payload["abstract"] = abstract
+        keywords = SourceService._section_excerpt(lines, "keywords", max_lines=2)
+        if keywords:
+            payload["keywords"] = keywords
+        authors = SourceService._guess_authors(lines)
+        if authors:
+            payload["authors"] = authors
+        return payload
+
+    @staticmethod
+    def _section_excerpt(lines: list[str], heading: str, max_lines: int = 8) -> str:
+        heading_lower = heading.lower()
+        for index, line in enumerate(lines):
+            normalized = line.rstrip(":").lower()
+            if normalized == heading_lower or normalized.startswith(f"{heading_lower}:"):
+                if ":" in line and len(line.split(":", 1)[1].strip()) > 20:
+                    return line.split(":", 1)[1].strip()[:1500]
+                body: list[str] = []
+                for candidate in lines[index + 1 : index + 1 + max_lines]:
+                    if SourceService._looks_like_section_heading(candidate):
+                        break
+                    body.append(candidate)
+                return " ".join(body)[:1500]
+        return ""
+
+    @staticmethod
+    def _looks_like_section_heading(line: str) -> bool:
+        normalized = line.strip().lower().rstrip(":")
+        known = {
+            "abstract",
+            "introduction",
+            "related work",
+            "method",
+            "methodology",
+            "experiments",
+            "results",
+            "conclusion",
+            "references",
+        }
+        return normalized in known or normalized[:2].isdigit()
+
+    @staticmethod
+    def _guess_authors(lines: list[str]) -> str:
+        for line in lines[1:5]:
+            lowered = line.lower()
+            if any(token in lowered for token in ("abstract", "introduction", "keywords")):
+                return ""
+            if "," in line or " and " in lowered:
+                return line[:500]
+        return ""
+
+    @staticmethod
+    def _first_publication_year(text: str) -> int | None:
+        for match in re.finditer(r"\b(19|20)\d{2}\b", text):
+            year = int(match.group(0))
+            if 1990 <= year <= 2100:
+                return year
+        return None
 
     @staticmethod
     def _extract_pdf_with_pypdf(path: Path, payload: bytes) -> str:

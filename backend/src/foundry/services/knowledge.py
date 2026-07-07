@@ -98,8 +98,11 @@ class ChromaVectorDB:
 
     def _new_store(self):
         self.settings.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
+        collection_name = (
+            self.settings.chroma_collection_name or self.settings.vector_collection_name
+        )
         return self._chroma_cls(
-            collection_name=self.settings.vector_collection_name,
+            collection_name=collection_name,
             embedding_function=self.embeddings,
             persist_directory=str(self.settings.chroma_persist_dir),
         )
@@ -131,6 +134,8 @@ class KnowledgeIndex:
         self.average_document_length = 0.0
         self._next_document_id = 0
         self._dense_index_unavailable = False
+        self._kiwi: object | None = None
+        self._kiwi_unavailable = False
 
     def reset(self) -> None:
         if isinstance(self.vector_store, PostgresVectorDB | ChromaVectorDB):
@@ -167,6 +172,62 @@ class KnowledgeIndex:
         candidate_k: int | None = None,
         kind: str | None = None,
     ) -> list[SearchResult]:
+        return self.hybrid_search(query, top_k, candidate_k=candidate_k, kind=kind)
+
+    def keyword_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        kind: str | None = None,
+    ) -> list[SearchResult]:
+        """BM25 keyword search over indexed PDF chunks.
+
+        Kiwi tokenization is used when `kiwipiepy` is installed and enabled. The regex
+        tokenizer remains as the deterministic fallback for local tests and minimal installs.
+        """
+        if not self.documents:
+            return []
+
+        sparse_scores = self._sparse_scores(query, kind=kind)
+        ordered = sorted(sparse_scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
+        max_sparse = max((score for _, score in ordered), default=1.0) or 1.0
+        results: list[SearchResult] = []
+        for index, raw_score in ordered:
+            if raw_score <= 0:
+                continue
+            sparse_score = raw_score / max_sparse
+            document = self.documents[index]
+            results.append(
+                SearchResult(
+                    document=document,
+                    score=sparse_score,
+                    sparse_score=sparse_score,
+                    fusion_score=sparse_score,
+                    rerank_score=self._rerank_score(query, document, 0.0, sparse_score),
+                )
+            )
+        return results
+
+    def vector_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        kind: str | None = None,
+    ) -> list[SearchResult]:
+        """Dense Chroma/Postgres/memory vector search."""
+        return self._dense_only_search(query, top_k, kind=kind)
+
+    def hybrid_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        candidate_k: int | None = None,
+        kind: str | None = None,
+    ) -> list[SearchResult]:
+        """Hybrid search using dense vector search + BM25 + Reciprocal Rank Fusion."""
         if not self.documents:
             return self._dense_only_search(query, top_k, kind=kind)
 
@@ -225,6 +286,7 @@ class KnowledgeIndex:
             fusion_score = self._rrf_score(
                 dense_rank.get(document_id),
                 sparse_rank.get(document_id),
+                self.settings.rrf_k,
             )
             rerank_score = self._rerank_score(query, document, dense_score, sparse_score)
             score = (fusion_score * 0.35) + (rerank_score * 0.65)
@@ -348,9 +410,31 @@ class KnowledgeIndex:
             + location_bonus,
         )
 
-    @staticmethod
-    def _tokens(text: str) -> list[str]:
+    def _tokens(self, text: str) -> list[str]:
+        if self.settings.kiwi_enabled and not self._kiwi_unavailable:
+            try:
+                kiwi = self._kiwi_instance()
+                tokens = [
+                    str(getattr(token, "form", token)).lower()
+                    for token in kiwi.tokenize(text)
+                    if str(getattr(token, "form", token)).strip()
+                ]
+                if tokens:
+                    return tokens
+            except Exception:
+                self._kiwi_unavailable = True
         return TOKEN_PATTERN.findall(text.lower())
+
+    def _kiwi_instance(self) -> object:
+        if self._kiwi is not None:
+            return self._kiwi
+        try:
+            from kiwipiepy import Kiwi
+        except ImportError as exc:
+            self._kiwi_unavailable = True
+            raise exc
+        self._kiwi = Kiwi()
+        return self._kiwi
 
     @staticmethod
     def _matches_kind(document: Document | None, kind: str) -> bool:
