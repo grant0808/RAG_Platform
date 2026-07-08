@@ -81,19 +81,64 @@ class PostgresVectorDB:
             self.store.create_collection()
 
 
+class ChromaVectorDB:
+    def __init__(self, settings: Settings, embeddings: Embeddings) -> None:
+        try:
+            from langchain_chroma import Chroma
+        except ImportError as exc:
+            raise ConfigurationError(
+                "Chroma vector DB requires the langchain-chroma and chromadb packages. "
+                "Run `uv sync` after updating dependencies."
+            ) from exc
+
+        self.settings = settings
+        self.embeddings = embeddings
+        self._chroma_cls = Chroma
+        self.store = self._new_store()
+
+    def _new_store(self):
+        self.settings.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
+        collection_name = (
+            self.settings.chroma_collection_name or self.settings.vector_collection_name
+        )
+        return self._chroma_cls(
+            collection_name=collection_name,
+            embedding_function=self.embeddings,
+            persist_directory=str(self.settings.chroma_persist_dir),
+        )
+
+    def add_documents(self, documents: list[Document]) -> None:
+        self.store.add_documents(
+            documents,
+            ids=[str(document.metadata["knowledge_id"]) for document in documents],
+        )
+
+    def similarity_search_with_score(self, query: str, k: int) -> list[tuple[Document, float]]:
+        return self.store.similarity_search_with_score(query, k=k)
+
+    def reset(self) -> None:
+        try:
+            self.store.delete_collection()
+        except Exception:
+            pass
+        self.store = self._new_store()
+
+
 class KnowledgeIndex:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.vector_store: InMemoryVectorStore | PostgresVectorDB | None = None
+        self.vector_store: InMemoryVectorStore | PostgresVectorDB | ChromaVectorDB | None = None
         self.documents: list[Document] = []
         self.term_frequencies: list[Counter[str]] = []
         self.document_frequencies: Counter[str] = Counter()
         self.average_document_length = 0.0
         self._next_document_id = 0
         self._dense_index_unavailable = False
+        self._kiwi: object | None = None
+        self._kiwi_unavailable = False
 
     def reset(self) -> None:
-        if isinstance(self.vector_store, PostgresVectorDB):
+        if isinstance(self.vector_store, PostgresVectorDB | ChromaVectorDB):
             self.vector_store.reset()
         elif self.vector_store is not None:
             self.vector_store = None
@@ -127,8 +172,64 @@ class KnowledgeIndex:
         candidate_k: int | None = None,
         kind: str | None = None,
     ) -> list[SearchResult]:
+        return self.hybrid_search(query, top_k, candidate_k=candidate_k, kind=kind)
+
+    def keyword_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        kind: str | None = None,
+    ) -> list[SearchResult]:
+        """BM25 keyword search over indexed PDF chunks.
+
+        Kiwi tokenization is used when `kiwipiepy` is installed and enabled. The regex
+        tokenizer remains as the deterministic fallback for local tests and minimal installs.
+        """
         if not self.documents:
             return []
+
+        sparse_scores = self._sparse_scores(query, kind=kind)
+        ordered = sorted(sparse_scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
+        max_sparse = max((score for _, score in ordered), default=1.0) or 1.0
+        results: list[SearchResult] = []
+        for index, raw_score in ordered:
+            if raw_score <= 0:
+                continue
+            sparse_score = raw_score / max_sparse
+            document = self.documents[index]
+            results.append(
+                SearchResult(
+                    document=document,
+                    score=sparse_score,
+                    sparse_score=sparse_score,
+                    fusion_score=sparse_score,
+                    rerank_score=self._rerank_score(query, document, 0.0, sparse_score),
+                )
+            )
+        return results
+
+    def vector_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        kind: str | None = None,
+    ) -> list[SearchResult]:
+        """Dense Chroma/Postgres/memory vector search."""
+        return self._dense_only_search(query, top_k, kind=kind)
+
+    def hybrid_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        candidate_k: int | None = None,
+        kind: str | None = None,
+    ) -> list[SearchResult]:
+        """Hybrid search using dense vector search + BM25 + Reciprocal Rank Fusion."""
+        if not self.documents:
+            return self._dense_only_search(query, top_k, kind=kind)
 
         candidate_count = min(len(self.documents), candidate_k or max(top_k * 4, top_k))
         try:
@@ -185,6 +286,7 @@ class KnowledgeIndex:
             fusion_score = self._rrf_score(
                 dense_rank.get(document_id),
                 sparse_rank.get(document_id),
+                self.settings.rrf_k,
             )
             rerank_score = self._rerank_score(query, document, dense_score, sparse_score)
             score = (fusion_score * 0.35) + (rerank_score * 0.65)
@@ -200,6 +302,42 @@ class KnowledgeIndex:
             )
 
         return sorted(results, key=lambda result: result.score, reverse=True)[:top_k]
+
+    def _dense_only_search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        kind: str | None,
+    ) -> list[SearchResult]:
+        try:
+            vector_store = self._vector_store()
+            dense_hits = (
+                vector_store.similarity_search_with_score(query, k=top_k)
+                if vector_store is not None
+                else []
+            )
+        except Exception:
+            logger.info("Dense vector search unavailable; using sparse index")
+            self.vector_store = None
+            self._dense_index_unavailable = True
+            return []
+
+        results: list[SearchResult] = []
+        for document, raw_score in dense_hits:
+            if kind and not self._matches_kind(document, kind):
+                continue
+            dense_score = self._dense_score(raw_score)
+            results.append(
+                SearchResult(
+                    document=document,
+                    score=dense_score,
+                    dense_score=dense_score,
+                    fusion_score=dense_score,
+                    rerank_score=dense_score,
+                )
+            )
+        return results[:top_k]
 
     def _rebuild_sparse_index(self) -> None:
         self.term_frequencies = []
@@ -272,9 +410,31 @@ class KnowledgeIndex:
             + location_bonus,
         )
 
-    @staticmethod
-    def _tokens(text: str) -> list[str]:
+    def _tokens(self, text: str) -> list[str]:
+        if self.settings.kiwi_enabled and not self._kiwi_unavailable:
+            try:
+                kiwi = self._kiwi_instance()
+                tokens = [
+                    str(getattr(token, "form", token)).lower()
+                    for token in kiwi.tokenize(text)
+                    if str(getattr(token, "form", token)).strip()
+                ]
+                if tokens:
+                    return tokens
+            except Exception:
+                self._kiwi_unavailable = True
         return TOKEN_PATTERN.findall(text.lower())
+
+    def _kiwi_instance(self) -> object:
+        if self._kiwi is not None:
+            return self._kiwi
+        try:
+            from kiwipiepy import Kiwi
+        except ImportError as exc:
+            self._kiwi_unavailable = True
+            raise exc
+        self._kiwi = Kiwi()
+        return self._kiwi
 
     @staticmethod
     def _matches_kind(document: Document | None, kind: str) -> bool:
@@ -306,7 +466,7 @@ class KnowledgeIndex:
     def _dense_score(raw_score: float) -> float:
         return 1 / (1 + max(float(raw_score), 0.0))
 
-    def _vector_store(self) -> InMemoryVectorStore | PostgresVectorDB | None:
+    def _vector_store(self) -> InMemoryVectorStore | PostgresVectorDB | ChromaVectorDB | None:
         if self._dense_index_unavailable:
             return None
         if self.vector_store is not None:
@@ -329,10 +489,19 @@ class KnowledgeIndex:
     def _build_embeddings(self) -> Embeddings:
         if self.settings.embedding_provider == "local":
             return LocalHashEmbeddings()
+        if self.settings.embedding_provider == "huggingface":
+            try:
+                from langchain_huggingface import HuggingFaceEmbeddings
+            except ImportError as exc:
+                raise ConfigurationError(
+                    "Hugging Face embeddings require the langchain-huggingface and "
+                    "sentence-transformers packages. Run `uv sync` after updating dependencies."
+                ) from exc
+            return HuggingFaceEmbeddings(model_name=self.settings.huggingface_embedding_model)
         if self.settings.embedding_provider != "openai":
             raise ConfigurationError(
                 f"Unsupported embedding provider: {self.settings.embedding_provider}. "
-                "Supported values: 'openai', 'local'."
+                "Supported values: 'openai', 'huggingface', 'local'."
             )
         api_key = self._configured_openai_api_key()
         if api_key is None:
@@ -347,13 +516,17 @@ class KnowledgeIndex:
             chunk_size=1000,
         )
 
-    def _build_vector_store(self, embeddings: Embeddings) -> InMemoryVectorStore | PostgresVectorDB:
+    def _build_vector_store(
+        self, embeddings: Embeddings
+    ) -> InMemoryVectorStore | PostgresVectorDB | ChromaVectorDB:
         if self.settings.vector_store_provider == "memory":
             return InMemoryVectorStore(embeddings)
+        if self.settings.vector_store_provider == "chroma":
+            return ChromaVectorDB(self.settings, embeddings)
         if self.settings.vector_store_provider != "postgres":
             raise ConfigurationError(
                 f"Unsupported vector store provider: {self.settings.vector_store_provider}. "
-                "Supported values: 'postgres', 'memory'."
+                "Supported values: 'chroma', 'postgres', 'memory'."
             )
         return PostgresVectorDB(self.settings, embeddings)
 

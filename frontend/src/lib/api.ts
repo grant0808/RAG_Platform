@@ -11,6 +11,9 @@ import type {
   PipelineVersion,
   Provider,
   ProviderName,
+  RagasDatasetItem,
+  RagasEvaluationResult,
+  RagasEvaluationSummary,
   Source,
   Strategy,
   TraceEvent,
@@ -117,6 +120,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ pipeline_id: pipelineId, test_queries: testQueries }),
     }),
+  runRagasEvaluation: (
+    pipelineId: string,
+    dataset: RagasDatasetItem[],
+    runName?: string,
+  ) =>
+    request<RagasEvaluationResult>("/evaluations/ragas", {
+      method: "POST",
+      body: JSON.stringify({
+        pipeline_id: pipelineId,
+        dataset,
+        run_name: runName || null,
+      }),
+    }),
+  listRagasEvaluations: () => request<RagasEvaluationSummary[]>("/evaluations/ragas"),
   createChatSession: (pipelineId: string, title?: string) =>
     request<ChatSession>("/chat/sessions", {
       method: "POST",
@@ -133,6 +150,24 @@ export const api = {
     request<ChatMessage[]>(`/chat/sessions/${sessionId}/messages`),
   deleteChatSession: (sessionId: string) =>
     request<void>(`/chat/sessions/${sessionId}`, { method: "DELETE" }),
+  createConversation: (pipelineId: string, title?: string) =>
+    request<ChatSession>("/chat/sessions", {
+      method: "POST",
+      body: JSON.stringify({ pipeline_id: pipelineId, title: title || null }),
+    }),
+  getConversations: (pipelineId: string) =>
+    request<ChatSession[]>(`/chat/sessions?pipeline_id=${encodeURIComponent(pipelineId)}`),
+  getConversationMessages: (conversationId: string) =>
+    request<ChatMessage[]>(`/chat/sessions/${conversationId}/messages`),
+  sendRagQuery: (payload: { pipelineId: string; conversationId: string | null; query: string }) =>
+    request<ChatResponse>("/rag/query", {
+      method: "POST",
+      body: JSON.stringify({
+        pipeline_id: payload.pipelineId,
+        conversation_id: payload.conversationId,
+        query: payload.query,
+      }),
+    }),
 };
 
 type StreamHandlers = {

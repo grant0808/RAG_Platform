@@ -1,8 +1,15 @@
+import sys
+from io import BytesIO
+from types import ModuleType, SimpleNamespace
+
 from fastapi.testclient import TestClient
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, AIMessageChunk
+from pypdf import PdfWriter
 
 from foundry.core.config import Settings
 from foundry.main import create_app
+from foundry.services.knowledge import KnowledgeIndex, LocalHashEmbeddings
 
 PDF_WITH_TEXT = (
     b"%PDF-1.4\n"
@@ -34,11 +41,6 @@ class FakeChatModel:
 
     async def ainvoke(self, messages):
         type(self).seen_messages.append(messages)
-        system_text = str(messages[0].content)
-        if "Generate exactly one DuckDB SELECT query" in system_text:
-            return AIMessage(
-                content='SELECT product, tickets FROM "source_table" ORDER BY tickets DESC'
-            )
         return AIMessage(
             content="Atlas Pro가 가장 많은 문의를 받았습니다.",
             usage_metadata={"input_tokens": 20, "output_tokens": 8, "total_tokens": 28},
@@ -153,6 +155,7 @@ def test_startup_rewrites_invalid_openai_pipeline_models(tmp_path):
         "database_url": database_url,
         "vector_store_provider": "memory",
         "embedding_provider": "local",
+        "pdf_parser": "pypdf",
         "openai_api_key": None,
         "openai_embedding_api_key": None,
         "openai_admin_api_key": None,
@@ -178,6 +181,32 @@ def test_startup_rewrites_invalid_openai_pipeline_models(tmp_path):
         pipelines = second_client.get("/api/v1/pipelines").json()
 
     assert pipelines[0]["model"] == "gpt-4o-mini"
+
+
+def test_ollama_provider_can_connect_with_default_base_url(client):
+    response = client.put(
+        "/api/v1/providers/ollama",
+        json={"api_key": "", "validate_connection": False},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "ollama"
+    assert body["masked_key"].endswith("1434")
+    assert body["models"] == []
+
+    pipeline = client.post(
+        "/api/v1/pipelines",
+        json={
+            "name": "Ollama RAG",
+            "strategy": "rag",
+            "provider": "ollama",
+            "model": "llama3.1",
+            "similarity_threshold": 0,
+        },
+    )
+    assert pipeline.status_code == 201
+    assert pipeline.json()["provider"] == "ollama"
 
 
 def test_source_pipeline_version_and_rag_chat(client, app, monkeypatch):
@@ -206,6 +235,279 @@ def test_source_pipeline_version_and_rag_chat(client, app, monkeypatch):
     assert any(event["step"] == "retriever" for event in body["trace"])
 
 
+def test_general_question_skips_rag_route(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "안녕, 간단히 인사해줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "general"
+    assert body["contexts"] == []
+    assert body["citations"] == []
+    assert any(event["step"] == "rag_router" for event in body["trace"])
+
+
+def test_web_fallback_route_handles_disabled_provider(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "최신 RAG 논문 동향을 웹에서 찾아줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "web_fallback"
+    assert body["sources"] == []
+    assert any(event["step"] == "web_search" for event in body["trace"])
+
+
+def test_chat_routes_general_questions_without_retrieval(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat/query",
+        json={"pipeline_id": pipeline["id"], "message": "안녕, 오늘 테스트 상태를 알려줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "general"
+    assert body["citations"] == []
+    assert not any(event["step"] == "retriever" for event in body["trace"])
+
+
+def test_langgraph_rag_route_selects_keyword_tool_for_exact_terms(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("paper.md", "BERT fine-tuning experiment Table 2 accuracy result.")},
+    )
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "논문에서 BERT Table 2 결과는?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] in {"rag", "web_fallback"}
+    assert body["selected_tool"] == "keyword_search_healthcare_pdf"
+    assert body["rewritten_query"]
+    assert any(event["step"] == "rewrite_query" for event in body["trace"])
+
+
+def test_langgraph_rag_route_selects_vector_tool_for_definition(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    client.post(
+        "/api/v1/sources/upload",
+        files={
+            "file": (
+                "paper.md",
+                "Retrieval augmented generation combines search and generation.",
+            )
+        },
+    )
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "문서에서 RAG 개념을 설명해줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["selected_tool"] == "vector_search_healthcare_pdf"
+    assert any(event["step"] == "select_retrieval_tool" for event in body["trace"])
+
+
+def test_langgraph_rag_route_uses_duckduckgo_fallback_when_context_missing(
+    client,
+    app,
+    monkeypatch,
+):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "업로드한 논문에서 없는 실험 결과는?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "web_fallback"
+    assert body["web_results"] == []
+    assert body["sources"] == []
+    assert any(event["step"] == "web_search_fallback" for event in body["trace"])
+
+
+def test_chat_uses_web_fallback_when_rag_context_is_missing(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/chat",
+        json={"pipeline_id": pipeline["id"], "message": "업로드한 논문에서 모델 한계는?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "web_fallback"
+    assert body["sources"] == []
+    assert body["citations"] == []
+    assert any(event["step"] == "web_search" for event in body["trace"])
+
+
+def test_langgraph_rag_query_routes_general_without_retrieval(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "안녕, 간단히 인사해줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "general"
+    assert body["selected_tool"] == "none"
+    assert body["contexts"] == []
+    assert any(event["step"] == "route_question" for event in body["trace"])
+
+
+def test_langgraph_rag_query_uses_hybrid_tool_and_reranker(client, app, monkeypatch):
+    app.state.container.settings.min_context_count = 1
+    app.state.container.settings.rerank_score_threshold = 0
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    upload = client.post(
+        "/api/v1/sources/upload",
+        files={
+            "file": (
+                "paper.md",
+                "Transformer method improves attention experiment result. "
+                "The limitation is compute cost.",
+            )
+        },
+    )
+    assert upload.status_code == 201
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "message": "논문에서 method와 result를 비교해줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "rag"
+    assert body["selected_tool"] == "hybrid_search_healthcare_pdf"
+    assert body["rewritten_query"]
+    assert body["contexts"]
+    assert body["contexts"][0]["rerank_score"] >= 0
+    assert body["reranker_model"] == "BAAI/bge-reranker-v2-m3"
+    assert any(event["step"] == "rerank_documents" for event in body["trace"])
+
+
+def test_langgraph_rag_query_falls_back_to_web_when_context_missing(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/rag/query",
+        json={
+            "pipeline_id": pipeline["id"],
+            "message": "업로드한 PDF에서 unknown method 한계를 찾아줘",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "web_fallback"
+    assert body["sources"] == []
+    assert body["web_results"] == []
+    assert any(event["step"] == "web_search_fallback" for event in body["trace"])
+
+
+def test_retrieval_tool_selector_prefers_keyword_vector_and_hybrid(client, app):
+    tools = app.state.container.langgraph_workflow.retrieval_tools
+
+    assert (
+        tools.select_tool(
+            rewritten_query="BERT dataset table 2",
+            search_intent="general",
+            keywords=["bert", "dataset"],
+        )
+        == "keyword_search_healthcare_pdf"
+    )
+    assert (
+        tools.select_tool(
+            rewritten_query="attention mechanism concept",
+            search_intent="definition",
+            keywords=["attention", "mechanism"],
+        )
+        == "vector_search_healthcare_pdf"
+    )
+    assert (
+        tools.select_tool(
+            rewritten_query="method experiment result comparison",
+            search_intent="comparison",
+            keywords=["method", "experiment", "result"],
+        )
+        == "hybrid_search_healthcare_pdf"
+    )
+
+
+def test_ragas_evaluation_endpoint_persists_json_result(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    response = client.post(
+        "/api/v1/evaluations/ragas",
+        json={
+            "pipeline_id": pipeline["id"],
+            "run_name": "smoke",
+            "dataset": [
+                {
+                    "question": "업로드한 논문에서 Atlas Pro 정책은?",
+                    "ground_truth": "Atlas Pro support handbook and warranty policy.",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run_name"] == "smoke"
+    assert body["ragas_backend"] in {"proxy", "ragas-installed-proxy-runner"}
+    assert body["averages"].keys() >= {
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall",
+    }
+    assert (app.state.container.settings.ragas_results_dir / f"{body['id']}.json").exists()
+
+
 def test_invalid_upload_returns_validation_error(client):
     response = client.post(
         "/api/v1/sources/upload",
@@ -230,12 +532,106 @@ def test_pdf_upload_succeeds(client):
     assert body["chunk_count"] >= 1
 
 
+def test_pdf_upload_uses_docling_metadata_when_available(client, app, monkeypatch):
+    app.state.container.settings.pdf_parser = "docling"
+
+    class FakeDoclingDocument:
+        name = "Attention Is All You Need"
+        pages = {1: object(), 2: object()}
+
+        def export_to_markdown(self):
+            return (
+                "# Attention Is All You Need\n\n"
+                "## Abstract\n\n"
+                "Transformer attention improves sequence modeling for AI systems."
+            )
+
+    class FakeDocumentConverter:
+        def convert(self, source):
+            assert source.suffix == ".pdf"
+            return SimpleNamespace(document=FakeDoclingDocument())
+
+    class FakeChunker:
+        def __init__(self, **_kwargs):
+            pass
+
+        def chunk(self, dl_doc):
+            assert dl_doc.name == "Attention Is All You Need"
+            provenance = SimpleNamespace(page_no=1)
+            doc_item = SimpleNamespace(label="paragraph", prov=[provenance])
+            meta = SimpleNamespace(
+                headings=["Attention Is All You Need", "Abstract"],
+                captions=[],
+                doc_items=[doc_item],
+            )
+            yield SimpleNamespace(
+                text="Transformer attention improves sequence modeling for AI systems.",
+                meta=meta,
+            )
+
+        def contextualize(self, chunk):
+            return f"Attention Is All You Need\nAbstract\n{chunk.text}"
+
+    docling_module = ModuleType("docling")
+    chunking_module = ModuleType("docling.chunking")
+    chunking_module.HybridChunker = FakeChunker
+    converter_module = ModuleType("docling.document_converter")
+    converter_module.DocumentConverter = FakeDocumentConverter
+    monkeypatch.setitem(sys.modules, "docling", docling_module)
+    monkeypatch.setitem(sys.modules, "docling.chunking", chunking_module)
+    monkeypatch.setitem(sys.modules, "docling.document_converter", converter_module)
+    monkeypatch.setattr(
+        app.state.container.sources,
+        "_docling_chunker",
+        lambda hybrid_chunker_cls: hybrid_chunker_cls(),
+    )
+
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("attention.pdf", PDF_WITH_TEXT, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["chunk_count"] >= 1
+    indexed = app.state.container.sources.knowledge.documents[0]
+    assert indexed.metadata["parser"] == "docling"
+    assert indexed.metadata["document_type"] == "ai_computer_science_paper"
+    assert indexed.metadata["normalized_format"] == "markdown"
+    assert indexed.metadata["title"] == "Attention Is All You Need"
+    assert indexed.metadata["page_count"] == 2
+    assert indexed.metadata["section_path"] == "Attention Is All You Need > Abstract"
+    assert indexed.metadata["page_start"] == 1
+    assert indexed.metadata["docling_labels"] == "paragraph"
+    assert "Transformer attention" in indexed.metadata["original_text"]
+
+
+def test_valid_pdf_without_extractable_text_is_saved_as_no_text_source(client):
+    buffer = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.write(buffer)
+
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("scanned-or-blank.pdf", buffer.getvalue())},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["kind"] == "pdf"
+    assert body["status"] == "no_text"
+    assert body["chunk_count"] == 0
+    assert client.get("/api/v1/sources").json()[0]["name"] == "scanned-or-blank.pdf"
+
+
 def test_upload_uses_sparse_index_when_openai_embedding_key_is_missing(tmp_path):
     settings = Settings(
         data_dir=tmp_path / "data",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         vector_store_provider="postgres",
         embedding_provider="openai",
+        pdf_parser="pypdf",
         openai_api_key=None,
         openai_embedding_api_key=None,
         openai_admin_api_key=None,
@@ -251,6 +647,27 @@ def test_upload_uses_sparse_index_when_openai_embedding_key_is_missing(tmp_path)
 
     assert response.status_code == 201
     assert response.json()["chunk_count"] >= 1
+
+
+
+def test_upload_returns_configuration_error_when_indexing_fails(client, app, monkeypatch):
+    def broken_add_documents(_documents):
+        raise RuntimeError("embedding backend unavailable")
+
+    monkeypatch.setattr(
+        app.state.container.sources.knowledge,
+        "add_documents",
+        broken_add_documents,
+    )
+
+    response = client.post(
+        "/api/v1/sources/upload",
+        files={"file": ("handbook.md", "Atlas Pro support handbook and warranty policy.")},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "configuration_error"
+    assert client.get("/api/v1/sources").json() == []
 
 
 def test_pdf_upload_succeeds_when_dense_index_is_unavailable(client, app, monkeypatch):
@@ -271,53 +688,113 @@ def test_pdf_upload_succeeds_when_dense_index_is_unavailable(client, app, monkey
     assert knowledge.search("Hello PDF upload", top_k=1)
 
 
-def test_tag_executes_only_validated_select(client, app, monkeypatch):
+def test_chroma_vector_store_indexes_documents_without_external_service(tmp_path, monkeypatch):
+    class FakeChroma:
+        def __init__(self, collection_name, embedding_function, persist_directory):
+            self.collection_name = collection_name
+            self.embedding_function = embedding_function
+            self.persist_directory = persist_directory
+            self.documents = []
+            self.deleted = False
+
+        def add_documents(self, documents, ids):
+            self.documents.extend(zip(ids, documents, strict=True))
+
+        def similarity_search_with_score(self, _query, k):
+            return [(document, 0.0) for _id, document in self.documents[:k]]
+
+        def delete_collection(self):
+            self.deleted = True
+
+    chroma_module = ModuleType("langchain_chroma")
+    chroma_module.Chroma = FakeChroma
+    monkeypatch.setitem(sys.modules, "langchain_chroma", chroma_module)
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        chroma_persist_dir=tmp_path / "chroma",
+        vector_store_provider="chroma",
+        embedding_provider="local",
+    )
+    knowledge = KnowledgeIndex(settings)
+    vector_store = knowledge._build_vector_store(LocalHashEmbeddings())
+
+    vector_store.add_documents(
+        [Document(page_content="graph neural networks", metadata={"knowledge_id": "paper-1"})]
+    )
+
+    assert vector_store.store.collection_name == "healthcare_pdf_papers"
+    assert vector_store.store.persist_directory == str(tmp_path / "chroma")
+    assert vector_store.similarity_search_with_score("neural", k=1)[0][0].page_content.startswith(
+        "graph"
+    )
+
+
+def test_ragas_evaluation_endpoint_stores_json_result(client, app, monkeypatch):
     connect_provider(client)
     install_fake_model(app, monkeypatch)
     upload = client.post(
         "/api/v1/sources/upload",
-        files={"file": ("support.csv", "product,tickets\nAtlas Pro,1284\nNova,410\n")},
+        files={"file": ("handbook.md", "Atlas Pro support handbook and warranty policy.")},
     )
     assert upload.status_code == 201
-    table_name = upload.json()["table_name"]
+    pipeline = create_pipeline(client, "rag")
 
-    original_ainvoke = FakeChatModel.ainvoke
-
-    async def tag_aware_ainvoke(self, messages):
-        if "Generate exactly one DuckDB SELECT query" in str(messages[0].content):
-            return AIMessage(
-                content=f'SELECT product, tickets FROM "{table_name}" ORDER BY tickets DESC'
-            )
-        return await original_ainvoke(self, messages)
-
-    monkeypatch.setattr(FakeChatModel, "ainvoke", tag_aware_ainvoke)
-    pipeline = create_pipeline(client, "tag")
     response = client.post(
-        "/api/v1/chat",
-        json={"pipeline_id": pipeline["id"], "message": "문의가 가장 많은 제품은?"},
+        "/api/v1/evaluations/ragas",
+        json={
+            "pipeline_id": pipeline["id"],
+            "run_name": "smoke-ragas",
+            "dataset": [
+                {
+                    "question": "문서에서 Atlas Pro 정책은?",
+                    "ground_truth": "Atlas Pro support handbook and warranty policy.",
+                }
+            ],
+        },
     )
 
     assert response.status_code == 200
-    assert any(event["step"] == "safe_sql_tool" for event in response.json()["trace"])
+    body = response.json()
+    assert body["run_name"] == "smoke-ragas"
+    assert body["ragas_backend"] in {"proxy", "ragas-installed-proxy-runner"}
+    assert body["metrics"][0]["question"] == "문서에서 Atlas Pro 정책은?"
+    assert set(body["averages"]) == {
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall",
+    }
+    assert app.state.container.settings.ragas_results_dir.joinpath(f"{body['id']}.json").exists()
+
+    listed = client.get("/api/v1/evaluations/ragas")
+    assert listed.status_code == 200
+    assert any(item["id"] == body["id"] for item in listed.json())
 
 
-def test_cag_returns_cached_second_response(client, app, monkeypatch):
-    connect_provider(client)
-    install_fake_model(app, monkeypatch)
-    client.post(
+def test_table_upload_is_no_longer_supported(client):
+    response = client.post(
         "/api/v1/sources/upload",
-        files={"file": ("metrics.txt", "The p95 target is three seconds.")},
+        files={"file": ("support.csv", "product,tickets\nAtlas Pro,1284\nNova,410\n")},
     )
-    pipeline = create_pipeline(client, "cag")
-    payload = {"pipeline_id": pipeline["id"], "message": "응답 목표는?"}
 
-    first = client.post("/api/v1/chat", json=payload)
-    second = client.post("/api/v1/chat", json=payload)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
 
-    assert first.status_code == 200
-    assert first.json()["cached"] is False
-    assert second.status_code == 200
-    assert second.json()["cached"] is True
+
+def test_non_rag_strategy_is_rejected(client):
+    connect_provider(client)
+
+    response = client.post(
+        "/api/v1/pipelines",
+        json={
+            "name": "Invalid strategy assistant",
+            "strategy": "sql",
+            "provider": "openai",
+            "model": "gpt-test",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_deployment_exposes_public_chat_without_auth(client, app, monkeypatch):
@@ -356,7 +833,7 @@ def test_deployment_executes_immutable_pipeline_version(client, app, monkeypatch
 
     updated = client.patch(
         f"/api/v1/pipelines/{pipeline['id']}",
-        json={"strategy": "cag", "model": "changed-draft-model"},
+        json={"model": "changed-draft-model"},
     )
     assert updated.status_code == 200
     response = client.post("/api/v1/public/immutable-preview/chat", json={"message": "Atlas란?"})
@@ -430,7 +907,7 @@ def test_rollback_creates_deployable_immutable_head(client):
     pipeline = create_pipeline(client, "rag")
     client.patch(
         f"/api/v1/pipelines/{pipeline['id']}",
-        json={"strategy": "cag"},
+        json={"model": "changed-draft-model"},
     )
     saved = client.post(f"/api/v1/pipelines/{pipeline['id']}/versions")
     assert saved.status_code == 201
@@ -626,6 +1103,38 @@ def test_stream_chat_persists_session_and_uses_history(client, app, monkeypatch)
         "user",
         "assistant",
     ]
+    assert messages[-1]["conversation_id"] == session_id
+    assert messages[-1]["route"] in {"general", "rag", "web_fallback"}
+
+
+def test_rag_query_accepts_conversation_id_and_reports_memory(client, app, monkeypatch):
+    connect_provider(client)
+    install_fake_model(app, monkeypatch)
+    pipeline = create_pipeline(client, "rag")
+
+    first = client.post(
+        "/api/v1/rag/query",
+        json={"pipeline_id": pipeline["id"], "query": "이 논문의 방법론을 설명해줘"},
+    )
+    assert first.status_code == 200
+    conversation_id = first.json()["conversation_id"]
+
+    second = client.post(
+        "/api/v1/rag/query",
+        json={
+            "pipeline_id": pipeline["id"],
+            "conversation_id": conversation_id,
+            "query": "그럼 한계점은 뭐야?",
+        },
+    )
+
+    assert second.status_code == 200
+    body = second.json()
+    assert body["conversation_id"] == conversation_id
+    assert body["message_id"]
+    assert body["memory_used"] is True
+    assert body["history_count"] >= 2
+    assert "방법론" in (body["rewritten_query"] or "")
 
 
 def test_chat_session_title_can_be_set_and_renamed(client):

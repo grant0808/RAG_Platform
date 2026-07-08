@@ -6,9 +6,46 @@ import { PageHeading, StatusBadge, formatDate } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { AppSnapshot, ProviderName } from "@/lib/types";
 
-const providers: Array<{ id: ProviderName; mark: string; name: string; api: string }> = [
-  { id: "openai", mark: "OA", name: "OpenAI", api: "Responses + Models API" },
-  { id: "anthropic", mark: "AN", name: "Anthropic", api: "Messages + Models API" },
+type ProviderDefinition = {
+  id: ProviderName;
+  mark: string;
+  name: string;
+  api: string;
+  credentialLabel: string;
+  placeholder: string;
+  defaultCredential?: string;
+  credentialRequired: boolean;
+};
+
+const providers: ProviderDefinition[] = [
+  {
+    id: "openai",
+    mark: "OA",
+    name: "OpenAI",
+    api: "Responses + Models API",
+    credentialLabel: "API key",
+    placeholder: "sk-...",
+    credentialRequired: true,
+  },
+  {
+    id: "anthropic",
+    mark: "AN",
+    name: "Anthropic",
+    api: "Messages + Models API",
+    credentialLabel: "API key",
+    placeholder: "sk-ant-...",
+    credentialRequired: true,
+  },
+  {
+    id: "ollama",
+    mark: "OL",
+    name: "Ollama",
+    api: "Local /api/tags + ChatOllama",
+    credentialLabel: "Base URL",
+    placeholder: "http://localhost:11434",
+    defaultCredential: "http://localhost:11434",
+    credentialRequired: false,
+  },
 ];
 
 export function ProvidersView({
@@ -26,7 +63,7 @@ export function ProvidersView({
     setBusy(provider);
     try {
       await api.connectProvider(provider, String(form.get("apiKey")), form.get("validate") === "on");
-      notify(`${provider} credential을 저장했습니다.`);
+      notify(provider === "ollama" ? "local Ollama 연결을 저장했습니다." : `${provider} credential을 저장했습니다.`);
       await refresh();
     } catch (caught) {
       notify(caught instanceof Error ? caught.message : "Provider 연결에 실패했습니다.");
@@ -65,7 +102,7 @@ export function ProvidersView({
         index="03"
         title="Bring your own"
         outline="intelligence."
-        description="Provider key는 backend로만 전송되고 암호화 저장됩니다. 응답에는 masked secret만 노출하며, local fake mode에서는 실제 API 호출 없이도 실행할 수 있습니다."
+        description="Provider key와 local Ollama base URL은 backend로만 전송되고 암호화 저장됩니다. Ollama가 로컬에서 실행 중이면 http://localhost:11434로 바로 연결할 수 있습니다."
       />
       <div className="vault-banner">
         <span className="vault-symbol">KEY</span>
@@ -114,23 +151,36 @@ export function ProvidersView({
                 }}
               >
                 <label className="field">
-                  <span>{connection ? "Rotate API key" : "API key"}</span>
+                  <span>
+                    {connection
+                      ? `Update ${definition.credentialLabel}`
+                      : definition.credentialLabel}
+                  </span>
                   <input
                     name="apiKey"
-                    type="password"
-                    minLength={8}
+                    type={definition.id === "ollama" ? "url" : "password"}
+                    minLength={definition.id === "ollama" ? undefined : 8}
                     autoComplete="new-password"
-                    placeholder="저장 후 다시 표시하지 않습니다"
-                    required
+                    placeholder={definition.placeholder}
+                    defaultValue={definition.defaultCredential}
+                    required={definition.credentialRequired}
                   />
                 </label>
                 <label className="checkbox-row">
                   <input type="checkbox" name="validate" defaultChecked />
-                  <span>Provider model API로 실제 model list 검증</span>
+                  <span>
+                    {definition.id === "ollama"
+                      ? "Local Ollama /api/tags로 model list 검증"
+                      : "Provider model API로 실제 model list 검증"}
+                  </span>
                 </label>
                 <div className="provider-actions">
                   <button className="button primary" disabled={busy === definition.id}>
-                    {busy === definition.id ? "Working..." : connection ? "Rotate key" : "Connect"}
+                    {busy === definition.id
+                      ? "Working..."
+                      : connection
+                        ? definition.id === "ollama" ? "Update URL" : "Rotate key"
+                        : definition.id === "ollama" ? "Connect local" : "Connect"}
                   </button>
                   {connection && (
                     <>

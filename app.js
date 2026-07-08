@@ -26,9 +26,6 @@ const state = {
     PDF: true,
     Notion: true,
     Web: false,
-    CSV: true,
-    Excel: false,
-    PostgreSQL: false,
   },
   deployments: 1,
 };
@@ -43,8 +40,6 @@ const app = document.querySelector("#app");
 const sidebar = document.querySelector("#sidebar");
 const routeContent = {
   RAG: { title: "Document RAG", description: "의미 기반 검색으로 문서에서 근거를 찾고 답변을 생성합니다.", source: "142 docs", latency: "1.84s", hit: "91.2%" },
-  TAG: { title: "Table TAG", description: "테이블 스키마를 이해하고 자연어 질문을 안전한 쿼리로 변환합니다.", source: "8 tables", latency: "1.12s", hit: "87.6%" },
-  CAG: { title: "Cached CAG", description: "반복되는 핵심 지식을 캐시해 더 빠르고 저렴하게 응답합니다.", source: "24 entries", latency: "0.48s", hit: "96.4%" },
 };
 
 function pageHeading(index, title, outline, description, action = "") {
@@ -57,19 +52,19 @@ function pageHeading(index, title, outline, description, action = "") {
 function overviewView() {
   const route = routeContent[state.route];
   return `<section class="page">
-    ${pageHeading("01", "Build knowledge.", "Ship answers.", "분산된 문서와 테이블을 하나의 검증 가능한 AI 파이프라인으로 연결하세요.")}
+    ${pageHeading("01", "Build knowledge.", "Ship answers.", "분산된 문서를 하나의 검증 가능한 AI 파이프라인으로 연결하세요.")}
     <div class="hero-grid">
       <article class="hero-card">
         <div class="hero-top"><span class="status-pill"><i></i> PIPELINE HEALTHY</span><span class="hero-number">RUN / 24,891</span></div>
         <div class="hero-copy">
           <h2>질문에서 근거까지,<br /><em>10분 안에.</em></h2>
-          <p>Knowledge assistant는 문서·표·캐시를 조합해 출처가 명확한 답변을 제공합니다.</p>
+          <p>Knowledge assistant는 문서 검색으로 출처가 명확한 답변을 제공합니다.</p>
           <button class="button button-acid" data-go="playground">Open playground →</button>
         </div>
       </article>
       <aside class="route-card" aria-label="라우팅 방식">
         <div class="route-rail">
-          ${["RAG","TAG","CAG"].map(item => `<button class="route-letter ${state.route === item ? "active" : ""}" data-route="${item}" aria-label="${item} 선택">${item[0]}</button>`).join("")}
+          <button class="route-letter active" data-route="RAG" aria-label="RAG 선택">R</button>
         </div>
         <div class="route-detail">
           <span class="route-code">ACTIVE / ${state.route}</span>
@@ -85,11 +80,10 @@ function overviewView() {
       <div class="metric"><div class="metric-label"><span>P95 LATENCY</span><span>◷</span></div><div class="metric-value">2.41s</div><div class="metric-delta">Within 3s target</div></div>
       <div class="metric"><div class="metric-label"><span>COST / QUERY</span><span>$</span></div><div class="metric-value">$0.021</div><div class="metric-delta">30% below target</div></div>
     </div>
-    <div class="section-title"><h2>최근 파이프라인</h2><span>3 ACTIVE</span></div>
+    <div class="section-title"><h2>최근 파이프라인</h2><span>2 ACTIVE</span></div>
     <div class="table-card"><table class="data-table"><thead><tr><th>Pipeline</th><th>Strategy</th><th>Requests</th><th>Accuracy</th><th>Last updated</th><th>Health</th></tr></thead><tbody>
-      <tr data-go="pipeline"><td><div class="pipeline-name"><span class="pipeline-icon">KA</span>Knowledge assistant</div></td><td><span class="mini-badge">R+T+C</span></td><td>6,824</td><td>88.6%</td><td>4 min ago</td><td><span class="health">Healthy</span></td></tr>
+      <tr data-go="pipeline"><td><div class="pipeline-name"><span class="pipeline-icon">KA</span>Knowledge assistant</div></td><td><span class="mini-badge">RAG</span></td><td>6,824</td><td>88.6%</td><td>4 min ago</td><td><span class="health">Healthy</span></td></tr>
       <tr><td><div class="pipeline-name"><span class="pipeline-icon">CS</span>CS Copilot</div></td><td><span class="mini-badge">RAG</span></td><td>1,229</td><td>91.2%</td><td>2 hrs ago</td><td><span class="health">Healthy</span></td></tr>
-      <tr><td><div class="pipeline-name"><span class="pipeline-icon">DA</span>Data analyst</div></td><td><span class="mini-badge">TAG</span></td><td>368</td><td>84.9%</td><td>Yesterday</td><td><span class="health">Healthy</span></td></tr>
     </tbody></table></div>
   </section>`;
 }
@@ -97,7 +91,6 @@ function overviewView() {
 function sourcesView() {
   const connectors = [
     ["PDF", "PDF", "파일 업로드", "문서, 보고서, 매뉴얼"], ["NT", "Notion", "Workspace sync", "페이지와 데이터베이스"], ["WB", "Web", "URL crawler", "사이트와 공개 문서"],
-    ["CSV", "CSV", "Table upload", "정형 데이터와 로그"], ["XLS", "Excel", "Workbook upload", "시트와 범위 선택"], ["PG", "PostgreSQL", "Read-only DB", "스키마 기반 안전 질의"],
   ];
   const count = Object.values(state.sources).filter(Boolean).length;
   return `<section class="page">
@@ -142,8 +135,8 @@ function pipelineView() {
       <div class="canvas">
         <div class="canvas-toolbar"><div class="segmented"><button class="active">Flow</button><button>Runs</button><button>Versions</button></div><div class="canvas-actions"><button aria-label="축소">−</button><button aria-label="확대">+</button><button aria-label="화면 맞춤">⌗</button></div></div>
         <div class="pipeline-flow"><div class="flow-line"></div>
-          <article class="node ${state.selectedNode === "source" ? "selected" : ""}" data-node="source"><span class="node-code">NODE / 01</span><div class="node-icon">▥</div><h3>LC Retriever</h3><p>PDF · Notion · CSV<br />PGVector retriever</p></article>
-          <article class="node node-router ${state.selectedNode === "router" ? "selected" : ""}" data-node="router"><span class="node-code">NODE / 02</span><div class="node-icon">Y</div><h3>Strategy Runnable</h3><p>RAG · TAG · CAG<br />Manual with fallback</p></article>
+          <article class="node ${state.selectedNode === "source" ? "selected" : ""}" data-node="source"><span class="node-code">NODE / 01</span><div class="node-icon">▥</div><h3>LC Retriever</h3><p>PDF · Notion · Web<br />PGVector retriever</p></article>
+          <article class="node node-router ${state.selectedNode === "router" ? "selected" : ""}" data-node="router"><span class="node-code">NODE / 02</span><div class="node-icon">R</div><h3>RAG Runnable</h3><p>Document retrieval<br />Grounded context</p></article>
           <article class="node ${state.selectedNode === "generate" ? "selected" : ""}" data-node="generate"><span class="node-code">NODE / 03</span><div class="node-icon">✣</div><h3>Generate answer</h3><p>${state.providers[state.activeProvider].name}<br />${state.activeModel}</p></article>
           <article class="node ${state.selectedNode === "output" ? "selected" : ""}" data-node="output"><span class="node-code">NODE / 04</span><div class="node-icon">↗</div><h3>Response</h3><p>Citations enabled<br />Stream output</p></article>
         </div>
@@ -152,10 +145,10 @@ function pipelineView() {
         <div class="inspector-head"><span>LANGCHAIN / NODE 02</span><h2>${state.selectedNode === "router" ? "Strategy Runnable" : state.selectedNode.charAt(0).toUpperCase() + state.selectedNode.slice(1)}</h2></div>
         <div class="settings-group"><div class="settings-label"><span>Model provider</span><output>CONNECTED</output></div><select id="providerSelect">${providerOptions.map(([id, provider]) => `<option value="${id}" ${state.activeProvider === id ? "selected" : ""}>${provider.name}</option>`).join("")}</select></div>
         <div class="settings-group"><div class="settings-label"><span>Model</span></div><select id="modelSelect">${modelOptions.map(model => `<option value="${model}" ${state.activeModel === model ? "selected" : ""}>${model}</option>`).join("")}</select></div>
-        <div class="settings-group"><div class="settings-label"><span>Routing mode</span></div><select><option>Manual with fallback</option><option>Automatic classifier</option><option>Rule based</option></select></div>
+        <div class="settings-group"><div class="settings-label"><span>Retrieval mode</span></div><select><option>Document RAG</option></select></div>
         <div class="settings-group"><div class="settings-label"><span>Retrieval top K</span><output id="topKOutput">5</output></div><input id="topK" type="range" min="1" max="12" value="5" /></div>
         <div class="settings-group"><div class="settings-label"><span>Similarity threshold</span><output id="thresholdOutput">0.78</output></div><input id="threshold" type="range" min="50" max="95" value="78" /></div>
-        <div class="settings-group"><div class="check-row"><span>Answer citations</span><label class="switch"><input type="checkbox" checked /><span></span></label></div><div class="check-row"><span>CAG fallback</span><label class="switch"><input type="checkbox" checked /><span></span></label></div><div class="check-row"><span>Query rewrite</span><label class="switch"><input type="checkbox" /><span></span></label></div></div>
+        <div class="settings-group"><div class="check-row"><span>Answer citations</span><label class="switch"><input type="checkbox" checked /><span></span></label></div><div class="check-row"><span>Query rewrite</span><label class="switch"><input type="checkbox" /><span></span></label></div></div>
         <div class="inspector-actions"><button class="button button-ghost" data-save>Save draft</button><button class="button button-primary" data-go="playground">Test run →</button></div>
       </aside>
     </div>
@@ -164,13 +157,13 @@ function pipelineView() {
 
 function playgroundView() {
   return `<section class="page">
-    ${pageHeading("05", "Test with", "evidence.", "실제 질문을 실행하고 어떤 전략과 Provider 모델, 근거가 답변에 사용됐는지 추적합니다.")}
+    ${pageHeading("05", "Test with", "evidence.", "실제 질문을 실행하고 어떤 Provider 모델과 근거가 답변에 사용됐는지 추적합니다.")}
     <div class="playground-layout">
       <div class="chat-panel"><div class="chat-head"><strong>${state.pipelineName}</strong><span class="model-pill">${state.providers[state.activeProvider].name} · ${state.activeModel} / v${state.version}</span></div>
-        <div class="messages" id="messages"><div class="message"><div class="message-meta"><span>FOUNDRY</span><span>09:41</span></div><div class="message-body">연결된 문서와 테이블에 대해 질문해 주세요. 답변과 함께 사용된 전략과 출처를 표시합니다.</div></div></div>
-        <form class="composer" id="chatForm"><div class="composer-box"><textarea id="chatInput" aria-label="질문 입력" placeholder="예: 지난 분기 고객 문의가 가장 많았던 제품은?" required></textarea><button aria-label="질문 전송">↑</button></div><p class="composer-hint">ENTER TO SEND · SHIFT+ENTER FOR NEW LINE</p></form>
+        <div class="messages" id="messages"><div class="message"><div class="message-meta"><span>FOUNDRY</span><span>09:41</span></div><div class="message-body">연결된 문서에 대해 질문해 주세요. 답변과 함께 사용된 출처를 표시합니다.</div></div></div>
+        <form class="composer" id="chatForm"><div class="composer-box"><textarea id="chatInput" aria-label="질문 입력" placeholder="예: 고객 데이터 보안 정책은 어떻게 되나요?" required></textarea><button aria-label="질문 전송">↑</button></div><p class="composer-hint">ENTER TO SEND · SHIFT+ENTER FOR NEW LINE</p></form>
       </div>
-      <aside class="trace-panel"><div class="trace-head"><span>LIVE / LANGCHAIN TRACE</span><h2>Runnable execution</h2></div><div class="trace-route"><div class="trace-rail"><div class="trace-step" data-trace="RAG">R</div><div class="trace-step active" data-trace="TAG">T</div><div class="trace-step" data-trace="CAG">C</div></div><div class="trace-details"><div class="trace-row"><strong>Retriever Runnable</strong><span>Standby · 142 docs</span></div><div class="trace-row"><strong>Safe SQL Tool</strong><span>Selected · 8 tables</span></div><div class="trace-row"><strong>Cache Retriever</strong><span>Fallback · 24 entries</span></div></div></div><div class="trace-metrics"><div><span>PROVIDER</span><b>${state.providers[state.activeProvider].name}</b></div><div><span>MODEL</span><b>${state.activeModel}</b></div><div><span>CONFIDENCE</span><b id="traceConfidence">94.2%</b></div><div><span>LATENCY</span><b id="traceLatency">1.12s</b></div><div><span>COST</span><b id="traceCost">$0.018</b></div><div><span>TOKENS</span><b>1,284</b></div></div></aside>
+      <aside class="trace-panel"><div class="trace-head"><span>LIVE / LANGCHAIN TRACE</span><h2>Runnable execution</h2></div><div class="trace-route"><div class="trace-rail"><div class="trace-step active" data-trace="RAG">R</div></div><div class="trace-details"><div class="trace-row"><strong>Retriever Runnable</strong><span>Selected · 142 docs</span></div><div class="trace-row"><strong>Chat Model</strong><span>Streaming answer</span></div></div></div><div class="trace-metrics"><div><span>PROVIDER</span><b>${state.providers[state.activeProvider].name}</b></div><div><span>MODEL</span><b>${state.activeModel}</b></div><div><span>CONFIDENCE</span><b id="traceConfidence">91.8%</b></div><div><span>LATENCY</span><b id="traceLatency">1.84s</b></div><div><span>COST</span><b id="traceCost">$0.024</b></div><div><span>TOKENS</span><b>1,284</b></div></div></aside>
     </div>
   </section>`;
 }
@@ -282,20 +275,16 @@ function handleChat(event) {
   input.value = "";
   messages.scrollTop = messages.scrollHeight;
 
-  const route = /표|매출|분기|제품|몇|통계|고객 문의/.test(text) ? "TAG" : /정책|문서|근거|가이드|매뉴얼/.test(text) ? "RAG" : "CAG";
+  const route = "RAG";
   document.querySelectorAll("[data-trace]").forEach(el => el.classList.toggle("active", el.dataset.trace === route));
-  document.querySelector("#traceConfidence").textContent = route === "TAG" ? "94.2%" : route === "RAG" ? "91.8%" : "96.4%";
-  document.querySelector("#traceLatency").textContent = route === "CAG" ? "0.48s" : route === "TAG" ? "1.12s" : "1.84s";
-  document.querySelector("#traceCost").textContent = route === "CAG" ? "$0.006" : route === "TAG" ? "$0.018" : "$0.024";
+  document.querySelector("#traceConfidence").textContent = "91.8%";
+  document.querySelector("#traceLatency").textContent = "1.84s";
+  document.querySelector("#traceCost").textContent = "$0.024";
 
   setTimeout(() => {
     document.querySelector(".thinking-message")?.remove();
-    const answer = route === "TAG"
-      ? "지난 분기 문의가 가장 많았던 제품은 <strong>Atlas Pro</strong>로, 총 1,284건이 접수되었습니다. 전체 제품 문의의 31.6%이며 전 분기 대비 8.2% 증가했습니다."
-      : route === "RAG"
-      ? "연결된 운영 가이드에 따르면, 고객 데이터는 테넌트별 인덱스로 격리되고 모든 외부 통신에는 TLS가 적용됩니다. 원본 문서와 임베딩 역시 조직별로 분리됩니다."
-      : "현재 캐시된 지식 기준으로 파이프라인의 목표 응답 시간은 p95 3초 이내이며, 최근 측정값은 2.41초입니다.";
-    const sources = route === "TAG" ? ["support_q4.csv · row 2,841", "products.xlsx · Sheet 1"] : route === "RAG" ? ["security-policy.pdf · p.12", "architecture.md · §4"] : ["CAG cache · metric_targets"];
+    const answer = "연결된 운영 가이드에 따르면, 고객 데이터는 테넌트별 인덱스로 격리되고 모든 외부 통신에는 TLS가 적용됩니다. 원본 문서와 임베딩 역시 조직별로 분리됩니다.";
+    const sources = ["security-policy.pdf · p.12", "architecture.md · §4"];
     messages.insertAdjacentHTML("beforeend", `<div class="message"><div class="message-meta"><span>FOUNDRY · ${route}</span><span>NOW</span></div><div class="message-body">${answer}<div class="message-sources">${sources.map(s => `<span class="source-chip">${s}</span>`).join("")}</div></div></div>`);
     messages.scrollTop = messages.scrollHeight;
   }, 850);

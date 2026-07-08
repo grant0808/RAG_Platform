@@ -21,7 +21,6 @@ export function SourcesView({
     null,
   );
   const totalSize = snapshot.sources.reduce((total, source) => total + source.size_bytes, 0);
-  const tables = snapshot.sources.filter((source) => source.kind === "table").length;
 
   async function upload(files: File[]) {
     if (!files.length) return;
@@ -80,7 +79,7 @@ export function SourcesView({
         index="02"
         title="Connect every"
         outline="source."
-        description="문서는 RAG chunks로, 테이블은 TAG catalog로 등록합니다. 업로드 즉시 index가 생성되어 Playground에서 바로 사용할 수 있습니다."
+        description="문서를 RAG chunks로 등록합니다. 업로드 즉시 index가 생성되어 Playground에서 바로 사용할 수 있습니다."
         action={
           <>
             <input
@@ -88,7 +87,7 @@ export function SourcesView({
               className="visually-hidden"
               type="file"
               multiple
-              accept=".txt,.md,.json,.html,.pdf,.csv,.xlsx,.xlsm"
+              accept=".txt,.md,.json,.html,.pdf"
               onChange={(event) => void upload(Array.from(event.target.files ?? []))}
             />
             <button
@@ -109,8 +108,8 @@ export function SourcesView({
           <span>Ready sources</span>
         </div>
         <div>
-          <strong>{tables}</strong>
-          <span>TAG tables</span>
+          <strong>{snapshot.sources.filter((source) => source.kind === "pdf").length}</strong>
+          <span>PDF sources</span>
         </div>
         <div>
           <strong>{formatBytes(totalSize)}</strong>
@@ -126,8 +125,8 @@ export function SourcesView({
         }}
       >
         <span>DATA PLANE / DROP KNOWLEDGE</span>
-        <strong>문서 또는 테이블 파일을 여기로 끌어오세요.</strong>
-        <small>TXT / MD / JSON / HTML / PDF / CSV / XLSX / XLSM, 최대 20 MiB</small>
+        <strong>문서 파일을 여기로 끌어오세요.</strong>
+        <small>TXT / MD / JSON / HTML / PDF, 최대 20 MiB</small>
       </div>
       <div className="section-title">
         <h2>Source registry</h2>
@@ -135,7 +134,7 @@ export function SourcesView({
       </div>
       {snapshot.sources.length === 0 ? (
         <EmptyState title="아직 연결된 source가 없습니다.">
-          문서나 테이블을 업로드해 RAG와 TAG 테스트를 시작하세요.
+          문서를 업로드해 RAG 테스트를 시작하세요.
         </EmptyState>
       ) : (
         <div className="source-list">

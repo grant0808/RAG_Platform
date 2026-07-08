@@ -212,8 +212,6 @@ export function Workbench() {
                 <span>Strategy</span>
                 <select name="strategy" defaultValue="rag">
                   <option value="rag">RAG</option>
-                  <option value="tag">TAG</option>
-                  <option value="cag">CAG</option>
                 </select>
               </label>
               <label className="field">

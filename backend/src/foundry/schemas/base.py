@@ -2,8 +2,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ProviderName = Literal["openai", "anthropic"]
-StrategyName = Literal["rag", "tag", "cag"]
+ProviderName = Literal["openai", "anthropic", "ollama"]
+StrategyName = Literal["rag"]
 
 
 class OrmModel(BaseModel):
@@ -15,6 +15,8 @@ class Citation(BaseModel):
     source_name: str
     location: str | None = None
     score: float | None = None
+    url: str | None = None
+    provider: str | None = None
 
 
 class TraceEvent(BaseModel):

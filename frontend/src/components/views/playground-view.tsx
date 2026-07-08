@@ -11,6 +11,10 @@ import type {
   Citation,
   EvaluationResult,
   Pipeline,
+  RagasDatasetItem,
+  RagasEvaluationResult,
+  RagasEvaluationSummary,
+  SourceReference,
   Strategy,
   TraceEvent,
 } from "@/lib/types";
@@ -21,6 +25,7 @@ type Message = {
   text: string;
   result?: ChatResponse;
   citations?: Citation[];
+  sources?: SourceReference[];
 };
 
 const EMPTY_MESSAGE: Message = {
@@ -48,7 +53,10 @@ export function PlaygroundView({
   const [traces, setTraces] = useState<TraceEvent[]>([]);
   const [strategy, setStrategy] = useState<Strategy>(pipeline?.strategy ?? "rag");
   const [running, setRunning] = useState(false);
+  const [ragasRunning, setRagasRunning] = useState(false);
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
+  const [ragasResult, setRagasResult] = useState<RagasEvaluationResult | null>(null);
+  const [ragasRuns, setRagasRuns] = useState<RagasEvaluationSummary[]>([]);
 
   const loadSessions = useCallback(
     async (pipelineId: string) => {
@@ -61,6 +69,15 @@ export function PlaygroundView({
     [notify],
   );
 
+  const loadRagasRuns = useCallback(async () => {
+    try {
+      const runs = await api.listRagasEvaluations();
+      setRagasRuns(runs);
+    } catch {
+      setRagasRuns([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!pipeline) return;
     setStrategy(pipeline.strategy);
@@ -69,7 +86,8 @@ export function PlaygroundView({
     setMessages([EMPTY_MESSAGE]);
     setTraces([]);
     void loadSessions(pipeline.id);
-  }, [loadSessions, pipeline]);
+    void loadRagasRuns();
+  }, [loadRagasRuns, loadSessions, pipeline]);
 
   if (!pipeline) {
     return (
@@ -97,6 +115,8 @@ export function PlaygroundView({
               id: message.id,
               role: message.role,
               text: message.content,
+              sources: message.sources ?? readSources(message.message_metadata),
+              result: readResult(message),
             }))
           : [EMPTY_MESSAGE],
       );
@@ -184,13 +204,13 @@ export function PlaygroundView({
             ),
           ),
         onDone: (result) => {
-          setActiveSessionId(result.session_id);
-          const knownSession = sessions.find((session) => session.id === result.session_id);
+          setActiveSessionId(result.conversation_id ?? result.session_id);
+          const knownSession = sessions.find((session) => session.id === (result.conversation_id ?? result.session_id));
           if (knownSession) setSessionTitleDraft(knownSession.title);
           setMessages((current) =>
             current.map((message) =>
               message.id === assistantId
-                ? { ...message, text: result.answer, result, citations: result.citations }
+                ? { ...message, id: result.message_id ?? message.id, text: result.answer, result, citations: result.citations, sources: result.sources }
                 : message,
             ),
           );
@@ -224,6 +244,25 @@ export function PlaygroundView({
     }
   }
 
+  async function runRagas() {
+    if (!pipeline) return;
+    setRagasRunning(true);
+    try {
+      const result = await api.runRagasEvaluation(
+        pipeline.id,
+        buildRagasDataset(lastResult),
+        `playground-${new Date().toISOString()}`,
+      );
+      setRagasResult(result);
+      await loadRagasRuns();
+      notify("RAGAS evaluation을 실행했습니다.");
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : "RAGAS evaluation 실행에 실패했습니다.");
+    } finally {
+      setRagasRunning(false);
+    }
+  }
+
   function handleMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
@@ -239,9 +278,14 @@ export function PlaygroundView({
         outline="evidence."
         description="SSE token, citation, LangChain trace event를 하나의 runtime frame에서 확인합니다."
         action={
-          <button className="button" disabled={running} onClick={() => void evaluate()}>
-            Run evaluation
-          </button>
+          <div className="top-actions">
+            <button className="button" disabled={running} onClick={() => void evaluate()}>
+              Run evaluation
+            </button>
+            <button className="button acid" disabled={ragasRunning} onClick={() => void runRagas()}>
+              Run RAGAS
+            </button>
+          </div>
         }
       />
       <div className="playground-toolbar">
@@ -287,8 +331,6 @@ export function PlaygroundView({
           <span>STRATEGY OVERRIDE</span>
           <select value={strategy} onChange={(event) => setStrategy(event.target.value as Strategy)}>
             <option value="rag">RAG</option>
-            <option value="tag">TAG</option>
-            <option value="cag">CAG</option>
           </select>
         </label>
         <div>
@@ -320,8 +362,18 @@ export function PlaygroundView({
           <div className="messages" aria-live="polite">
             {messages.map((message) => (
               <article key={message.id} className={`message ${message.role}`}>
-                <span>{message.role === "user" ? "YOU" : `FOUNDRY / ${message.result?.strategy?.toUpperCase() ?? "READY"}`}</span>
+                <span>{message.role === "user" ? "YOU" : `FOUNDRY / ${(message.result?.route ?? message.result?.strategy ?? "ready").toUpperCase()}`}</span>
                 <div>{message.text || <span className="typing">Running...</span>}</div>
+                {message.result && (
+                  <div className="message-meta">
+                    <span>{message.result.route}</span>
+                    <span>{message.result.selected_tool ?? "none"}</span>
+                    <span>{message.result.memory_used ? `memory ${message.result.history_count}` : "memory off"}</span>
+                  </div>
+                )}
+                {message.sources && message.sources.length > 0 && (
+                  <SourceList sources={message.sources} />
+                )}
                 {message.citations && message.citations.length > 0 && (
                   <footer>
                     {message.citations.map((citation, index) => (
@@ -361,7 +413,7 @@ export function PlaygroundView({
           </header>
           <div className="trace-list">
             {traces.length === 0 ? (
-              <p>질문을 실행하면 retriever, tool, cache, model 단계가 표시됩니다.</p>
+              <p>질문을 실행하면 retriever와 model 단계가 표시됩니다.</p>
             ) : (
               traces.map((trace, index) => (
                 <div key={`${trace.step}-${index}`}>
@@ -377,20 +429,20 @@ export function PlaygroundView({
           </div>
           <div className="trace-metrics">
             <div>
-              <span>STRATEGY</span>
-              <b>{lastResult?.strategy.toUpperCase() ?? strategy.toUpperCase()}</b>
+              <span>ROUTE</span>
+              <b>{lastResult?.route?.toUpperCase() ?? strategy.toUpperCase()}</b>
             </div>
             <div>
-              <span>CACHED</span>
-              <b>{lastResult?.cached ? "HIT" : "MISS"}</b>
+              <span>MODEL</span>
+              <b>{lastResult?.model ?? pipeline.model}</b>
             </div>
             <div>
               <span>TOKENS</span>
               <b>{lastResult?.usage.total_tokens ?? "--"}</b>
             </div>
             <div>
-              <span>CITATIONS</span>
-              <b>{lastResult?.citations.length ?? 0}</b>
+              <span>MEMORY</span>
+              <b>{lastResult?.memory_used ? lastResult.history_count : 0}</b>
             </div>
           </div>
           {evaluation && (
@@ -409,8 +461,150 @@ export function PlaygroundView({
               </dl>
             </div>
           )}
+          {ragasResult && (
+            <div className="evaluation-card ragas-card">
+              <span>RAGAS / {ragasResult.ragas_backend}</span>
+              <strong>{formatScore(ragasResult.averages.faithfulness)}</strong>
+              <dl>
+                <div>
+                  <dt>Answer relevancy</dt>
+                  <dd>{formatScore(ragasResult.averages.answer_relevancy)}</dd>
+                </div>
+                <div>
+                  <dt>Context precision</dt>
+                  <dd>{formatScore(ragasResult.averages.context_precision)}</dd>
+                </div>
+                <div>
+                  <dt>Context recall</dt>
+                  <dd>{formatScore(ragasResult.averages.context_recall)}</dd>
+                </div>
+              </dl>
+            </div>
+          )}
+          <div className="ragas-runs">
+            <span>RECENT RAGAS RUNS</span>
+            {ragasRuns.filter((run) => run.pipeline_id === pipeline.id).slice(0, 4).length === 0 ? (
+              <p>No RAGAS runs yet.</p>
+            ) : (
+              ragasRuns
+                .filter((run) => run.pipeline_id === pipeline.id)
+                .slice(0, 4)
+                .map((run) => (
+                  <div key={run.id}>
+                    <strong>{run.run_name ?? run.id.slice(0, 8)}</strong>
+                    <small>{formatScore(run.averages?.faithfulness)} faithfulness</small>
+                  </div>
+                ))
+            )}
+          </div>
         </aside>
       </div>
     </section>
   );
+}
+
+function readSources(metadata: Record<string, unknown>): SourceReference[] {
+  return Array.isArray(metadata.sources) ? (metadata.sources as SourceReference[]) : [];
+}
+
+function buildRagasDataset(lastResult: ChatResponse | undefined): RagasDatasetItem[] {
+  if (!lastResult?.query || !lastResult.answer) {
+    return [
+      {
+        question: "RAG pipeline smoke evaluation",
+        ground_truth: "The answer should be grounded in retrieved context and return sources.",
+        contexts: [],
+        metadata: { source: "playground-default" },
+      },
+    ];
+  }
+  return [
+    {
+      question: lastResult.query,
+      answer: lastResult.answer,
+      contexts: extractContextText(lastResult.contexts),
+      ground_truth: lastResult.answer,
+      metadata: {
+        route: lastResult.route,
+        selected_tool: lastResult.selected_tool,
+        source: "playground-last-response",
+      },
+    },
+  ];
+}
+
+function extractContextText(contexts: unknown[]): string[] {
+  return contexts
+    .map((context) => {
+      if (typeof context === "string") return context;
+      if (isRecord(context) && typeof context.content === "string") return context.content;
+      return "";
+    })
+    .filter(Boolean);
+}
+
+function formatScore(value: unknown): string {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "--";
+}
+
+function readResult(message: { message_metadata: Record<string, unknown> }): ChatResponse | undefined {
+  const metadata = message.message_metadata;
+  const route = metadata.route;
+  if (typeof route !== "string") return undefined;
+  return {
+    session_id: null,
+    conversation_id: null,
+    message_id: null,
+    answer: "",
+    strategy: typeof metadata.strategy === "string" ? metadata.strategy : "rag",
+    provider: "",
+    model: "",
+    route: route === "general" || route === "web_fallback" ? route : "rag",
+    selected_tool: typeof metadata.selected_tool === "string" ? metadata.selected_tool : null,
+    citations: Array.isArray(metadata.citations) ? (metadata.citations as Citation[]) : [],
+    trace: Array.isArray(metadata.trace) ? (metadata.trace as TraceEvent[]) : [],
+    usage: isRecord(metadata.usage) ? (metadata.usage as Record<string, number>) : {},
+    sources: readSources(metadata),
+    contexts: Array.isArray(metadata.contexts) ? metadata.contexts : [],
+    web_results: Array.isArray(metadata.web_results) ? (metadata.web_results as ChatResponse["web_results"]) : [],
+    cached: Boolean(metadata.cached),
+    memory_used: Boolean(metadata.memory_used),
+    history_count: typeof metadata.history_count === "number" ? metadata.history_count : 0,
+  };
+}
+
+function SourceList({ sources }: { sources: SourceReference[] }) {
+  return (
+    <div className="source-list">
+      {sources.map((source, index) => {
+        if (isWebSource(source)) {
+          return (
+            <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer">
+              <strong>{source.title || "Web source"}</strong>
+              <span>{source.provider ?? "web"} / {source.snippet}</span>
+            </a>
+          );
+        }
+        const record = source as Record<string, unknown>;
+        const filename = record.filename ?? record.source_name ?? record.source ?? "PDF source";
+        const page = record.page ?? record.location ?? "-";
+        const chunk = record.chunk_id ?? "-";
+        const score = record.rerank_score ?? record.score ?? "-";
+        return (
+          <div key={`${String(filename)}-${index}`}>
+            <strong>{String(filename)}</strong>
+            <span>page {String(page)} / chunk {String(chunk)} / score {String(score)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function isWebSource(source: SourceReference): source is ChatResponse["web_results"][number] {
+  return isRecord(source) && typeof source.url === "string" && typeof source.snippet === "string";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

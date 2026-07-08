@@ -10,9 +10,12 @@ from foundry.schemas.evaluation import (
     EvaluationMetric,
     EvaluationResultResponse,
     EvaluationRunRequest,
+    RagasEvaluationRequest,
+    RagasEvaluationResponse,
 )
 
 router = APIRouter(prefix="/evaluations", tags=["evaluation"])
+rag_router = APIRouter(prefix="/rag", tags=["rag"])
 
 
 @router.post("/run", response_model=EvaluationResultResponse)
@@ -87,3 +90,48 @@ async def run_evaluation(
         average_accuracy_score=round(total_accuracy / n, 2) if n > 0 else 0.0,
         metrics=metrics,
     )
+
+
+@router.post("/ragas", response_model=RagasEvaluationResponse)
+async def run_ragas_evaluation(
+    payload: RagasEvaluationRequest,
+    session: AsyncSession = Depends(get_session),
+    container: Container = Depends(get_container),
+) -> RagasEvaluationResponse:
+    try:
+        pipeline = await container.pipelines.get(session, payload.pipeline_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Pipeline not found") from None
+    try:
+        return await container.ragas_evaluation.run(
+            session,
+            pipeline,
+            dataset=payload.dataset,
+            dataset_path=payload.dataset_path,
+            run_name=payload.run_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/ragas")
+async def list_ragas_evaluations(
+    container: Container = Depends(get_container),
+) -> list[dict]:
+    return container.ragas_evaluation.list_results()
+
+
+@rag_router.post("/evaluate", response_model=RagasEvaluationResponse)
+async def run_rag_evaluation_alias(
+    payload: RagasEvaluationRequest,
+    session: AsyncSession = Depends(get_session),
+    container: Container = Depends(get_container),
+) -> RagasEvaluationResponse:
+    return await run_ragas_evaluation(payload, session, container)
+
+
+@rag_router.get("/evaluations")
+async def list_rag_evaluations_alias(
+    container: Container = Depends(get_container),
+) -> list[dict]:
+    return container.ragas_evaluation.list_results()

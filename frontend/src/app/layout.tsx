@@ -9,7 +9,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Foundry - LLMOps Workbench",
   description:
-    "LangChain RAG, TAG, CAG pipeline을 로컬에서 구성하고 검증하는 product workbench입니다.",
+    "LangChain RAG pipeline을 로컬에서 구성하고 검증하는 product workbench입니다.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
