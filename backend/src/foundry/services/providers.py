@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from foundry.core.config import Settings
 from foundry.core.crypto import CredentialCipher, mask_secret
-from foundry.core.errors import NotFoundError, ProviderError, ValidationError
+from foundry.core.errors import ConfigurationError, NotFoundError, ProviderError, ValidationError
 from foundry.models import ProviderConnection
 
 SUPPORTED_PROVIDERS = {"openai", "anthropic", "ollama"}
@@ -127,8 +127,15 @@ class ProviderService:
         return connection
 
     async def get_api_key(self, session: AsyncSession, provider: str) -> str:
+        provider = provider.lower()
         connection = await self.get(session, provider)
-        return self.cipher.decrypt(connection.encrypted_key)
+        try:
+            return self.cipher.decrypt(connection.encrypted_key)
+        except ConfigurationError:
+            fallback = self._runtime_credential(provider)
+            if fallback is None:
+                raise
+            return fallback
 
     async def refresh_models(self, session: AsyncSession, provider: str) -> ProviderConnection:
         connection = await self.get(session, provider)
@@ -141,10 +148,20 @@ class ProviderService:
         return connection
 
     async def disconnect(self, session: AsyncSession, provider: str) -> None:
+        provider = provider.lower()
         connection = await self.get(session, provider)
-        api_key = self.cipher.decrypt(connection.encrypted_key)
-        self._clear_openai_runtime_keys(provider, api_key)
+        try:
+            api_key = self.cipher.decrypt(connection.encrypted_key)
+        except ConfigurationError:
+            api_key = None
+        if api_key is not None:
+            self._clear_openai_runtime_keys(provider, api_key)
         await session.delete(connection)
+
+    def _runtime_credential(self, provider: str) -> str | None:
+        if provider != "openai" or self.settings.openai_api_key is None:
+            return None
+        return self.settings.openai_api_key.get_secret_value()
 
     def _sync_openai_runtime_keys(self, provider: str, api_key: str) -> None:
         if provider != "openai":

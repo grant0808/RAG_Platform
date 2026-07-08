@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from io import BytesIO
 from types import ModuleType, SimpleNamespace
@@ -5,10 +6,13 @@ from types import ModuleType, SimpleNamespace
 from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, AIMessageChunk
+from pydantic import SecretStr
 from pypdf import PdfWriter
+from sqlalchemy import select
 
 from foundry.core.config import Settings
 from foundry.main import create_app
+from foundry.models import ProviderConnection
 from foundry.services.knowledge import KnowledgeIndex, LocalHashEmbeddings
 
 PDF_WITH_TEXT = (
@@ -79,6 +83,16 @@ def connect_provider(client):
     return response
 
 
+async def tamper_provider_credential(app, provider="openai"):
+    async with app.state.container.database.session_factory() as session:
+        connection = await session.scalar(
+            select(ProviderConnection).where(ProviderConnection.provider == provider)
+        )
+        assert connection is not None
+        connection.encrypted_key = "not-a-valid-fernet-token"
+        await session.commit()
+
+
 def create_pipeline(client, strategy="rag"):
     response = client.post(
         "/api/v1/pipelines",
@@ -134,6 +148,28 @@ def test_openai_provider_key_is_used_for_embeddings(client, app):
     assert response.status_code == 204
     assert settings.openai_api_key is None
     assert settings.openai_embedding_api_key is None
+
+
+def test_openai_provider_falls_back_to_runtime_key_when_stored_key_cannot_decrypt(client, app):
+    connect_provider(client)
+    asyncio.run(tamper_provider_credential(app))
+    app.state.container.settings.openai_api_key = SecretStr("sk-runtime-fallback")
+
+    async def read_key():
+        async for session in app.state.container.database.session():
+            return await app.state.container.providers.get_api_key(session, "openai")
+
+    assert asyncio.run(read_key()) == "sk-runtime-fallback"
+
+
+def test_provider_can_disconnect_when_stored_key_cannot_decrypt(client, app):
+    connect_provider(client)
+    asyncio.run(tamper_provider_credential(app))
+
+    response = client.delete("/api/v1/providers/openai")
+
+    assert response.status_code == 204
+    assert client.get("/api/v1/providers").json() == []
 
 
 def test_pipeline_default_model_is_openai_chat_default(client):
