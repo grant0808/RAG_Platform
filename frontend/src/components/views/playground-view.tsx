@@ -1,8 +1,9 @@
 "use client";
 
-import { type KeyboardEvent, useCallback, useEffect, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { EmptyState, PageHeading } from "@/components/ui";
+import { useChatAutoScroll } from "@/hooks/use-chat-auto-scroll";
 import { api, streamChat } from "@/lib/api";
 import type {
   AppSnapshot,
@@ -57,6 +58,21 @@ export function PlaygroundView({
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
   const [ragasResult, setRagasResult] = useState<RagasEvaluationResult | null>(null);
   const [ragasRuns, setRagasRuns] = useState<RagasEvaluationSummary[]>([]);
+  const [loadingSessionMessages, setLoadingSessionMessages] = useState(false);
+  const loadedSessionScrollTargetRef = useRef<string | null>(null);
+  const messageSignature = messages
+    .map((message) => `${message.id}:${message.text.length}:${message.citations?.length ?? 0}`)
+    .join("|");
+  const hasLoadedNonEmptyMessages = !(
+    messages.length === 0 ||
+    (messages.length === 1 && messages[0].id === EMPTY_MESSAGE.id)
+  );
+  const {
+    scrollContainerRef,
+    bottomRef,
+    handleScroll,
+    scheduleScrollToBottom,
+  } = useChatAutoScroll({ threshold: 120 });
 
   const loadSessions = useCallback(
     async (pipelineId: string) => {
@@ -89,6 +105,25 @@ export function PlaygroundView({
     void loadRagasRuns();
   }, [loadRagasRuns, loadSessions, pipeline]);
 
+  useEffect(() => {
+    if (loadingSessionMessages) return;
+    if (!activeSessionId || loadedSessionScrollTargetRef.current !== activeSessionId) return;
+    if (!hasLoadedNonEmptyMessages) return;
+    scheduleScrollToBottom("auto", { force: true, doubleFrame: true });
+    loadedSessionScrollTargetRef.current = null;
+  }, [
+    activeSessionId,
+    hasLoadedNonEmptyMessages,
+    loadingSessionMessages,
+    scheduleScrollToBottom,
+  ]);
+
+  useEffect(() => {
+    if (loadingSessionMessages) return;
+    if (loadedSessionScrollTargetRef.current) return;
+    scheduleScrollToBottom(running ? "auto" : "smooth", { doubleFrame: true });
+  }, [loadingSessionMessages, messageSignature, running, scheduleScrollToBottom]);
+
   if (!pipeline) {
     return (
       <section className="page">
@@ -107,6 +142,8 @@ export function PlaygroundView({
     setActiveSessionId(sessionId);
     setSessionTitleDraft(sessions.find((session) => session.id === sessionId)?.title ?? "");
     setTraces([]);
+    setLoadingSessionMessages(true);
+    loadedSessionScrollTargetRef.current = sessionId;
     try {
       const history = await api.listChatMessages(sessionId);
       setMessages(
@@ -121,7 +158,10 @@ export function PlaygroundView({
           : [EMPTY_MESSAGE],
       );
     } catch (caught) {
+      loadedSessionScrollTargetRef.current = null;
       notify(caught instanceof Error ? caught.message : "Session messages를 불러오지 못했습니다.");
+    } finally {
+      setLoadingSessionMessages(false);
     }
   }
 
@@ -134,6 +174,7 @@ export function PlaygroundView({
       setSessionTitleDraft(session.title);
       setMessages([EMPTY_MESSAGE]);
       setTraces([]);
+      scheduleScrollToBottom("auto", { force: true });
     } catch (caught) {
       notify(caught instanceof Error ? caught.message : "Session을 생성하지 못했습니다.");
     }
@@ -147,6 +188,7 @@ export function PlaygroundView({
       setActiveSessionId(null);
       setSessionTitleDraft("");
       setMessages([EMPTY_MESSAGE]);
+      scheduleScrollToBottom("auto", { force: true });
       await loadSessions(currentPipeline.id);
     } catch (caught) {
       notify(caught instanceof Error ? caught.message : "Session을 삭제하지 못했습니다.");
@@ -184,6 +226,7 @@ export function PlaygroundView({
       { id: userId, role: "user", text },
       { id: assistantId, role: "assistant", text: "", citations: [] },
     ]);
+    scheduleScrollToBottom("smooth", { force: true, doubleFrame: true });
     setTraces([]);
     setRunning(true);
     try {
@@ -214,6 +257,7 @@ export function PlaygroundView({
                 : message,
             ),
           );
+          scheduleScrollToBottom("auto", { doubleFrame: true });
           setTraces(result.trace);
           void loadSessions(pipeline.id);
         },
@@ -225,6 +269,7 @@ export function PlaygroundView({
           message.id === assistantId ? { ...message, text: `실행 오류: ${error}` } : message,
         ),
       );
+      scheduleScrollToBottom("smooth", { force: true, doubleFrame: true });
     } finally {
       setRunning(false);
     }
@@ -359,7 +404,12 @@ export function PlaygroundView({
             </button>
             <span>{activeSessionId ? `Session ${activeSessionId.slice(0, 8)}` : "첫 메시지 전송 시 session 자동 생성"}</span>
           </div>
-          <div className="messages" aria-live="polite">
+          <div
+            ref={scrollContainerRef}
+            className="messages"
+            aria-live="polite"
+            onScroll={handleScroll}
+          >
             {messages.map((message) => (
               <article key={message.id} className={`message ${message.role}`}>
                 <span>{message.role === "user" ? "YOU" : `FOUNDRY / ${(message.result?.route ?? message.result?.strategy ?? "ready").toUpperCase()}`}</span>
@@ -385,6 +435,7 @@ export function PlaygroundView({
                 )}
               </article>
             ))}
+            <div ref={bottomRef} aria-hidden="true" />
           </div>
           <form
             className="composer"
