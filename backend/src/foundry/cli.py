@@ -17,15 +17,9 @@ LOCAL_PROVIDER_KEY = "sk-local-test-only-not-a-real-key"
 SAMPLE_FILES = {
     "foundry-guide.md": b"""# Foundry guide
 
-Foundry is a LangChain learning platform for RAG, TAG, and CAG pipelines.
+Foundry is a LangChain learning platform for RAG pipelines.
 The target first response latency is p95 three seconds and answers should cite sources.
 """,
-    "support-metrics.csv": (
-        b"product,tickets,satisfaction\n"
-        b"Atlas Pro,1284,0.91\n"
-        b"Nova,410,0.88\n"
-        b"Orbit,275,0.86\n"
-    ),
 }
 
 
@@ -34,7 +28,6 @@ async def initialize_database(settings: Settings | None = None) -> None:
     try:
         await container.database.create_schema()
     finally:
-        container.tables.close()
         await container.database.dispose()
 
 
@@ -72,23 +65,21 @@ async def bootstrap_local(settings: Settings | None = None) -> dict[str, Any]:
                 pipeline.name: pipeline
                 for pipeline in await session.scalars(select(Pipeline).order_by(Pipeline.name))
             }
-            for strategy in ("rag", "tag", "cag"):
-                name = f"Local {strategy.upper()} Demo"
-                if name not in pipelines:
-                    pipelines[name] = await container.pipelines.create(
-                        session,
-                        PipelineCreate(
-                            name=name,
-                            strategy=strategy,
-                            provider="openai",
-                            model=(
-                                "gpt-local-demo"
-                                if app_settings.fake_llm_enabled
-                                else app_settings.openai_chat_model
-                            ),
-                            similarity_threshold=0,
+            if "Local RAG Demo" not in pipelines:
+                pipelines["Local RAG Demo"] = await container.pipelines.create(
+                    session,
+                    PipelineCreate(
+                        name="Local RAG Demo",
+                        strategy="rag",
+                        provider="openai",
+                        model=(
+                            "gpt-local-demo"
+                            if app_settings.fake_llm_enabled
+                            else app_settings.openai_chat_model
                         ),
-                    )
+                        similarity_threshold=0,
+                    ),
+                )
 
             deployment = await session.scalar(
                 select(Deployment).where(Deployment.slug == "local-rag-preview")

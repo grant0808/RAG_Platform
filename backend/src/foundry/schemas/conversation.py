@@ -25,8 +25,13 @@ class ChatSessionResponse(OrmModel):
 
 class ChatMessageResponse(OrmModel):
     id: str
+    message_id: str | None = None
     session_id: str
-    role: Literal["user", "assistant"]
+    conversation_id: str | None = None
+    role: Literal["user", "assistant", "system"]
     content: str
     message_metadata: dict[str, Any] = Field(default_factory=dict)
+    route: str | None = None
+    selected_tool: str | None = None
+    sources: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime

@@ -12,7 +12,6 @@ export function OverviewView({
   onNavigate: (view: ViewName) => void;
   onSelectPipeline: (id: string) => void;
 }) {
-  const strategies = new Set(snapshot.pipelines.map((pipeline) => pipeline.strategy));
   const chunks = snapshot.sources.reduce((total, source) => total + source.chunk_count, 0);
   const production = snapshot.deployments.filter(
     (item) => item.environment === "production",
@@ -25,7 +24,7 @@ export function OverviewView({
         index="01"
         title="Build knowledge."
         outline="Ship answers."
-        description="파일과 테이블을 연결하고 RAG/TAG/CAG 파이프라인을 구성한 뒤, citation, trace, token 사용량까지 한 화면에서 검증합니다."
+        description="문서를 연결하고 RAG 파이프라인을 구성한 뒤, citation, trace, token 사용량까지 한 화면에서 검증합니다."
       />
       <div className="hero-grid">
         <article className="hero-card">
@@ -50,20 +49,13 @@ export function OverviewView({
         </article>
         <aside className="route-card">
           <div className="route-rail">
-            {(["R", "T", "C"] as const).map((letter, index) => (
-              <span
-                key={letter}
-                className={strategies.has((["rag", "tag", "cag"] as const)[index]) ? "active" : ""}
-              >
-                {letter}
-              </span>
-            ))}
+            <span className={snapshot.pipelines.length ? "active" : ""}>R</span>
           </div>
           <div className="route-detail">
             <span className="eyebrow">LANGCHAIN / COVERAGE</span>
-            <h3>{strategies.size} / 3 strategies</h3>
+            <h3>RAG strategy</h3>
             <p>
-              Runnable, retriever, safe SQL tool, cache fallback을 공통 응답 계약으로 묶어 제품 검증 속도를 높입니다.
+              Retriever와 chat model을 공통 응답 계약으로 묶어 citation, trace, token 사용량을 검증합니다.
             </p>
             <dl>
               <div>
@@ -88,7 +80,7 @@ export function OverviewView({
         <span>LIVE DATABASE</span>
       </div>
       <div className="metric-grid">
-        <Metric label="PIPELINES" value={String(snapshot.pipelines.length)} detail={`${strategies.size}개 전략 활성`} />
+        <Metric label="PIPELINES" value={String(snapshot.pipelines.length)} detail="RAG 전략 활성" />
         <Metric label="KNOWLEDGE SOURCES" value={String(snapshot.sources.length)} detail={`${chunks}개 indexed chunks`} />
         <Metric label="DEPLOYMENTS" value={String(snapshot.deployments.length)} detail={`production ${production} / stopped ${stopped}`} />
         <Metric label="AUTH" value={snapshot.health?.auth_enabled ? "ON" : "OFF"} detail="local PoC mode" warning />
@@ -117,7 +109,7 @@ export function OverviewView({
                   <strong>{pipeline.name}</strong>
                 </td>
                 <td>
-                  <span className={`strategy-tag ${pipeline.strategy}`}>
+                  <span className={`strategy-label ${pipeline.strategy}`}>
                     {pipeline.strategy.toUpperCase()}
                   </span>
                 </td>

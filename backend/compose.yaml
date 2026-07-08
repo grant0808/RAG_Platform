@@ -15,11 +15,8 @@ services:
       FOUNDRY_OPENAI_EMBEDDING_MODEL: ${FOUNDRY_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       FOUNDRY_MASTER_KEY_PATH: /app/.data/master.key
       FOUNDRY_FAKE_LLM_ENABLED: ${FOUNDRY_FAKE_LLM_ENABLED:-false}
-      FOUNDRY_REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     volumes:
       - foundry_data:/app/.data
@@ -58,23 +55,6 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    networks:
-      - foundry_backend
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    restart: unless-stopped
-
 networks:
   foundry_backend:
     driver: bridge
@@ -82,4 +62,3 @@ networks:
 volumes:
   foundry_data:
   postgres_data:
-  redis_data:
