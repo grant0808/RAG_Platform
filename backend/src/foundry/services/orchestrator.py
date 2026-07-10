@@ -413,7 +413,11 @@ class Orchestrator:
         if self.settings.fake_llm_enabled:
             return LocalFakeChatModel()
         if pipeline.provider == "openai":
-            return ChatOpenAI(model=pipeline.model, api_key=api_key, streaming=True)
+            base_url = None
+            if api_key == "":
+                api_key = "none"
+                base_url = "http://127.0.0.1:10531/v1"
+            return ChatOpenAI(model=pipeline.model, api_key=api_key, streaming=True, base_url=base_url)
         if pipeline.provider == "anthropic":
             return ChatAnthropic(model=pipeline.model, api_key=api_key, streaming=True)
         if pipeline.provider == "ollama":
