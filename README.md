@@ -1,6 +1,6 @@
 # RAG Platform
 
-Foundry는 문서와 테이블 데이터를 업로드하고 RAG, TAG, CAG 전략으로 질의 실행, trace 확인, 버전 관리, 배포 테스트까지 해볼 수 있는 LangChain 기반 PoC입니다.
+Foundry는 문서와 테이블 데이터를 업로드하고 RAG 전략으로 질의 실행, trace 확인, 버전 관리, 배포 테스트까지 해볼 수 있는 LangChain 기반 PoC입니다.
 
 이 저장소는 FastAPI 백엔드와 Next.js 프론트엔드를 함께 포함합니다.
 
@@ -10,14 +10,62 @@ Foundry는 문서와 테이블 데이터를 업로드하고 RAG, TAG, CAG 전략
 - 다중 파일 업로드: Sources 화면에서 여러 파일 선택 또는 드래그 앤 드롭
 - PDF 처리: 논문 PDF 같은 긴 문서를 chunk로 분할하고 citation metadata 생성
 - RAG: 문서 검색 기반 답변, citation, retriever/reranker trace
-- TAG: CSV/Excel을 DuckDB 테이블로 적재하고 read-only SQL 검증
-- CAG: 질문 단위 TTL cache, miss 시 RAG fallback
 - Provider 관리: OpenAI, Anthropic API key 등록, 마스킹 저장, 모델 목록 갱신
 - OpenAI key 연동: Provider에 OpenAI key를 입력하면 embedding key로도 사용
 - Streaming Playground: SSE token, citation, trace event 표시
 - Provider quota 대응: OpenAI quota 429 발생 시 local model fallback
 - Pipeline 관리: draft 수정, immutable version 저장, rollback
 - Deployment: preview/production slug와 public chat endpoint 생성
+
+## 한눈에 보기
+
+Foundry는 다음 흐름으로 문서를 지식 기반으로 만들고 질문에 답합니다.
+
+1. **Provider**에서 사용할 LLM과 API key를 연결합니다.
+2. **Sources**에서 문서, PDF, CSV, Excel 등의 파일을 업로드합니다.
+3. **Pipeline Studio**에서 검색 전략과 모델을 설정하고 버전을 저장합니다.
+4. **Chat**에서 질문하고 답변, citation, trace를 확인합니다.
+5. 필요하면 **Deployments**에서 외부에 공유할 preview/production endpoint를 만듭니다.
+
+![Foundry 전체 화면 개요](./img/overview.png)
+
+## 주요 화면
+
+### Provider 연결
+
+OpenAI와 Anthropic 같은 Provider를 등록하고 사용할 모델을 관리합니다.
+
+![Provider 관리 화면](./img/providers.png)
+
+### 문서와 데이터 업로드
+
+Sources 화면에서 여러 파일을 한 번에 업로드하고, 문서의 처리 상태와 검색에 사용할 source를 확인합니다.
+
+![Sources 업로드 화면](./img/sources.png)
+
+### RAG Pipeline 구성
+
+Pipeline Studio에서 RAG 전략, 모델, 검색 옵션을 조정하고 draft와 immutable version을 관리합니다.
+
+![Pipeline Studio 화면](./img/pipeline_studio.png)
+
+### 질문과 Trace 확인
+
+Chat 화면에서 질문을 실행하면 답변과 citation을 함께 확인할 수 있으며, trace rail에서 검색·rerank·model 단계를 살펴볼 수 있습니다.
+
+![Chat 및 trace 화면](./img/chat.png)
+
+### 배포
+
+Deployments 화면에서 pipeline을 preview 또는 production endpoint로 배포하고 public chat URL을 관리합니다.
+
+![Deployments 화면](./img/deployments.png)
+
+### RAGAS 평가
+
+RAGAS 화면에서 검색 결과와 답변 품질을 평가하고 실험 결과를 비교합니다.
+
+![RAGAS 평가 화면](./img/ragas.png)
 
 ## 구조
 
@@ -40,6 +88,10 @@ journal/   로컬 테스트용 PDF 자료
 - [ERD (dbdiagram)](https://dbdiagram.io/d/RAG-6a4a765e4ac62e474c31c8d5)
 - [Backend README](./backend/README.md)
 - [Frontend README](./frontend/README.md)
+
+데이터베이스 구조를 시각적으로 확인하려면 아래 ERD 이미지를 참고하세요.
+
+![RAG Platform 데이터베이스 ERD](./img/dbdiagram.png)
 
 
 ## 빠른 실행
