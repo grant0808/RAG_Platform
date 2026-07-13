@@ -276,8 +276,17 @@ flowchart LR
 | Sources | 문서 업로드와 source registry 관리 | upload button, drag/drop, source list, ready/pdf/size metrics | 다중 업로드, 삭제 | `/sources`, `/sources/upload`, `DELETE /sources/{id}` | source 없음, 업로드 실패 toast |
 | Providers | provider credential vault | provider cards, credential input, validate checkbox, model catalog | connect/update, refresh models, disconnect | `/providers/*` | model catalog 비어 있음 |
 | Pipeline Studio | RAG pipeline 설정과 version 관리 | flow canvas, inspector, prompt/top_k/threshold controls, version tab | draft 저장, version 저장, rollback, 삭제 | `/pipelines/*` | pipeline 없음 |
-| Playground | RAG chat 실행/검증 | pipeline/session/strategy selector, chat, composer, trace panel, evaluation card | 질문, `/status`, session CRUD, evaluation | `/chat/stream`, `/chat/sessions/*`, `/evaluations/run` | pipeline 없음, stream error message |
+| Playground | RAG chat 실행/검증 | pipeline/session/strategy selector, chat, composer, trace panel, evaluation card, chat auto-scroll | 질문, `/status`, session CRUD, evaluation | `/chat/stream`, `/chat/sessions/*`, `/evaluations/run` | pipeline 없음, stream error message |
 | Deployments | versioned endpoint 관리 | deployment form, endpoint card, env/status badge | create, copy, run/stop, env 변경, 삭제 | `/deployments/*`, `/public/{slug}/chat` | deployment 없음 |
+
+#### Playground chat scroll UX
+
+- 새 프롬프트 전송 직후 `.messages` scroll container는 최신 사용자 메시지 위치로 이동한다.
+- SSE token, citation, done result, error message로 message state가 갱신될 때 사용자가 하단 근처에 있으면 자동으로 하단을 유지한다.
+- 사용자가 과거 메시지를 읽기 위해 하단에서 벗어나면 streaming 중에도 강제로 하단 이동하지 않는다.
+- 사용자가 다시 하단 근처로 이동하면 자동 스크롤을 재활성화한다.
+- 기존 chat session을 선택하면 `/chat/sessions/{session_id}/messages` 로딩과 DOM 렌더링 이후 `auto` scroll로 가장 최근 메시지를 표시한다.
+- Markdown/code/source block처럼 콘텐츠 높이가 늦게 변할 수 있는 영역은 `requestAnimationFrame` 기반 재시도와 DOM mutation/resize 관찰로 하단 유지 여부를 보정한다.
 
 ### 5.12 권한 및 보안 요구사항
 
